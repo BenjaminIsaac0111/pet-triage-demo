@@ -20,7 +20,7 @@ graph LR
 
 ## Quick start
 
-Needs Python 3.10+ and [Ollama](https://ollama.com).
+Needs Python 3.11+ and [Ollama](https://ollama.com).
 
 ```bash
 ollama pull qwen2.5:7b
@@ -42,7 +42,7 @@ Settings (model, prompt version and so on) are optional; see `.env.example`.
 
 **With Docker** (app and Ollama together): `docker compose up -d`, then `docker compose exec ollama ollama pull qwen2.5:7b`, and open http://localhost:8501.
 
-GitHub Actions runs the linter, the tests on Python 3.10 and 3.13, and a Docker build on every push.
+GitHub Actions runs the linter, the tests on Python 3.11 and 3.13, and a Docker build on every push.
 
 ## How it works
 
