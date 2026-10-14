@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+mlruns/
+mlartifacts/
+mlflow.db
+.env
+.claude/
+# Private interview notes
+notes/
+# The company's task brief; keep it out of the public repo.
+Task.pdf

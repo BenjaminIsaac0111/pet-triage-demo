@@ -1,0 +1,15 @@
+{
+  "_note": "Illustrative emergency phrases for the keyword safety floor. Not clinically validated; a vet would need to review and extend this list before real use.",
+  "red_flags": [
+    {"id": "breathing", "label": "Breathing difficulty", "phrases": ["struggling to breathe", "can't breathe", "cannot breathe", "gasping", "blue gums", "blue tongue", "open mouth breathing", "open-mouth breathing"]},
+    {"id": "collapse", "label": "Collapse or unresponsive", "phrases": ["collapsed", "collapse", "unconscious", "won't wake", "unresponsive", "can't stand", "cannot stand"]},
+    {"id": "bloat", "label": "Possible bloat (unproductive retching, swollen belly)", "phrases": ["nothing comes up", "nothing coming up", "retching", "swollen belly", "belly looks swollen", "tight belly", "bloated"]},
+    {"id": "urinary_block", "label": "Possible urinary blockage", "phrases": ["straining to wee", "straining to pee", "straining to urinate", "can't wee", "can't pee", "nothing comes out", "barely anything comes out", "in and out of the litter tray", "in and out of his litter tray", "in and out of her litter tray"]},
+    {"id": "seizure", "label": "Seizure", "phrases": ["seizure", "fitting", "having a fit", "convulsing"]},
+    {"id": "bleeding_trauma", "label": "Heavy bleeding or major trauma", "phrases": ["won't stop bleeding", "bleeding heavily", "hit by a car", "hit by car", "fell from", "fallen from"]},
+    {"id": "poisoning", "label": "Possible poisoning", "phrases": ["ate chocolate", "eaten chocolate", "antifreeze", "rat poison", "slug pellets", "xylitol", "lily", "lilies", "ibuprofen", "paracetamol"]},
+    {"id": "heat", "label": "Heatstroke", "phrases": ["heatstroke", "heat stroke", "left in the car", "left in a hot car"]},
+    {"id": "birth", "label": "Problems giving birth", "phrases": ["straining to give birth", "stuck puppy", "stuck kitten", "pushing for over an hour"]},
+    {"id": "other", "label": "Other serious signs", "phrases": ["pale gums", "snake bite", "adder bite", "eye popped out", "eye has popped out"]}
+  ]
+}

@@ -1,0 +1,19 @@
+[project]
+name = "pet-triage-demo"
+version = "0.1.0"
+description = "Pet triage prototype using LangChain and MLflow"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Defaults plus import order, common bug patterns and modern-Python upgrades.
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = ["live: calls the real model through Ollama (run with: pytest -m live)"]

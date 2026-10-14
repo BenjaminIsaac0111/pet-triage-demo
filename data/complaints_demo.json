@@ -1,0 +1,20 @@
+{
+  "_note": "Illustrative stand-in for a VeNom presenting-complaint subset. The codes are made up (DEMO-xxx) because real VeNom codes are licensed on request from the VeNom Coding Group. Swap this file for the licensed list in a real deployment.",
+  "complaints": [
+    {"code": "DEMO-001", "term": "Vomiting", "category": "Gastrointestinal", "synonyms": ["being sick", "throwing up", "brought up food", "yellow foam", "bile"]},
+    {"code": "DEMO-002", "term": "Retching, unproductive", "category": "Gastrointestinal", "synonyms": ["trying to be sick but nothing comes up", "dry heaving", "gagging"]},
+    {"code": "DEMO-003", "term": "Straining to urinate", "category": "Urinary", "synonyms": ["straining to wee", "in and out of the litter tray", "only drips coming out", "crying when weeing"]},
+    {"code": "DEMO-004", "term": "Itching", "category": "Skin", "synonyms": ["scratching", "licking a lot", "chewing at skin", "itchy"]},
+    {"code": "DEMO-005", "term": "Skin lesion", "category": "Skin", "synonyms": ["red patch", "sore", "hot spot", "rash", "scab", "bald patch"]},
+    {"code": "DEMO-006", "term": "Wound or cut", "category": "Trauma", "synonyms": ["cut", "bleeding", "gash", "bite wound", "cut paw pad"]},
+    {"code": "DEMO-007", "term": "Lethargy", "category": "General", "synonyms": ["tired", "flat", "sleeping more", "no energy", "not themselves"]},
+    {"code": "DEMO-008", "term": "Difficulty breathing", "category": "Respiratory", "synonyms": ["struggling to breathe", "panting heavily at rest", "breathing fast"]},
+    {"code": "DEMO-009", "term": "Diarrhoea", "category": "Gastrointestinal", "synonyms": ["runny poo", "loose stools", "upset tummy"]},
+    {"code": "DEMO-010", "term": "Lameness", "category": "Musculoskeletal", "synonyms": ["limping", "not putting weight on leg", "holding a paw up"]},
+    {"code": "DEMO-011", "term": "Swollen abdomen", "category": "Gastrointestinal", "synonyms": ["bloated", "swollen belly", "tight tummy"]},
+    {"code": "DEMO-012", "term": "Sneezing", "category": "Respiratory", "synonyms": ["sneezing", "runny nose", "snotty"]},
+    {"code": "DEMO-013", "term": "Eye discharge", "category": "Eye", "synonyms": ["gunky eye", "weepy eye", "squinting", "red eye"]},
+    {"code": "DEMO-014", "term": "Seizure", "category": "Neurological", "synonyms": ["fit", "fitting", "shaking and paddling", "convulsing"]},
+    {"code": "DEMO-015", "term": "Lump or swelling", "category": "Skin", "synonyms": ["lump", "bump", "swelling", "growth", "mass"]}
+  ]
+}

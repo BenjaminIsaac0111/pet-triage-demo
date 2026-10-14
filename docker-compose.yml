@@ -1,0 +1,25 @@
+# Web demo plus a local Ollama server.
+#   docker compose up -d
+#   docker compose exec ollama ollama pull qwen2.5:7b
+#   open http://localhost:8501
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      TRIAGE_MODEL: ${TRIAGE_MODEL:-qwen2.5:7b}
+    volumes:
+      - mlflow-data:/data
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  mlflow-data:
+  ollama-models:

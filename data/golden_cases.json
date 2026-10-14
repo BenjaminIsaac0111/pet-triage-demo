@@ -1,0 +1,87 @@
+{
+  "_note": "GC cases are synthetic, written by a non-vet; their expected labels are reasonable guesses, not clinical ground truth. RC cases are real and say where their labels came from. Each case has a reworded variant to check the result holds when the owner phrases things differently, and a scripted answer used if the system asks follow-up questions.",
+  "cases": [
+    {
+      "case_id": "GC01_blocked_cat",
+      "owner_inputs": [
+        "My boy cat Milo keeps going in and out of his litter tray and crying, but barely anything comes out.",
+        "Milo (male cat) has been squatting in his tray loads today and only a few drops of wee come out. He yowls when he tries."
+      ],
+      "scripted_answers": "It started this morning, so about 8 hours. He's 4 and neutered. He's hiding under the bed and hasn't eaten.",
+      "acceptable_codes": ["DEMO-003"],
+      "expected_urgency": "EMERGENCY",
+      "expected_photo": false
+    },
+    {
+      "case_id": "GC02_hot_spot",
+      "owner_inputs": [
+        "There's a red, wet, smelly patch on my retriever's neck that she won't stop scratching. It appeared two days ago.",
+        "My golden retriever has a sore, weepy bit of skin on her neck about the size of a coin and she keeps scratching at it."
+      ],
+      "scripted_answers": "It's about the size of a 50p coin and getting a bit bigger. She's eating and playing normally.",
+      "acceptable_codes": ["DEMO-005", "DEMO-004"],
+      "expected_urgency": "URGENT_24H",
+      "expected_photo": true
+    },
+    {
+      "case_id": "GC03_morning_bile",
+      "owner_inputs": [
+        "My dog brings up a bit of yellow foam most mornings before breakfast, then he's totally fine.",
+        "Every few mornings my spaniel sicks up a small amount of yellow liquid on an empty stomach. Otherwise he's his usual self."
+      ],
+      "scripted_answers": "It's been going on a couple of weeks, once a day at most. He's eating well, normal poos and full of energy.",
+      "acceptable_codes": ["DEMO-001"],
+      "expected_urgency": "ROUTINE",
+      "expected_photo": false
+    },
+    {
+      "case_id": "GC04_cut_paw_pad",
+      "owner_inputs": [
+        "My dog cut his paw pad on some glass at the park and it's bleeding quite a lot.",
+        "Just got back from a walk and my lab has a cut on the bottom of his paw from broken glass, there's blood everywhere."
+      ],
+      "scripted_answers": "I've pressed a towel on it for ten minutes and it's slowed to a slow ooze. The cut looks about 1cm long. He's limping on it.",
+      "acceptable_codes": ["DEMO-006"],
+      "expected_urgency": "URGENT_24H",
+      "expected_photo": true
+    },
+    {
+      "case_id": "GC05_bloat",
+      "owner_inputs": [
+        "My Great Dane keeps trying to be sick but nothing comes up, and his belly looks swollen and tight. He's pacing.",
+        "Our big dog is heaving over and over with nothing coming up, his stomach is puffed out and hard, and he can't settle."
+      ],
+      "scripted_answers": "It started about an hour after his dinner. His gums look a bit pale. He's drooling a lot.",
+      "acceptable_codes": ["DEMO-002", "DEMO-011"],
+      "expected_urgency": "EMERGENCY",
+      "expected_photo": false
+    },
+    {
+      "case_id": "GC06_sneezing_denied_flag",
+      "owner_inputs": [
+        "He's not struggling to breathe or anything, he's just been sneezing a lot since yesterday. Otherwise bouncy.",
+        "My cat has had a sneezing fit on and off since yesterday. No problems breathing, eating fine."
+      ],
+      "scripted_answers": "Clear runny nose, no blood. Eating and drinking normally and still playing.",
+      "acceptable_codes": ["DEMO-012"],
+      "expected_urgency": "ROUTINE",
+      "expected_photo": false
+    },
+    {
+      "case_id": "RC01_lump_after_neutering",
+      "source": "real case: owner's recollection of their own phone call, written down before running the system",
+      "label_source": "vet nurse phone triage at the time (advised an appointment the next day)",
+      "owner_inputs": [
+        "Hi, I'm worried about my cat. She has recently developed a lump on her rear end. Um, I'm a bit worried because she was recently neutered. Um, and I was wondering if that was something to be concerned about as well. Um, she was fine yesterday, however, she wasn't as able to jump up onto the chair, but I put that down to her maybe still being sore from her operation. Two weeks back, um, I've given her painkillers, but today she is very lethargic, and looks like she's in pain. Um, she is drinking and she is eating, which is good. And she is still quite affectionate. The lump is quite big, maybe two to three centimeters. In diameter, um, and also it seems like she's in pain when I Press on it. Lightly.",
+        "My cat's got a lump near her back end and she's not herself today. She was neutered a couple of weeks ago."
+      ],
+      "variant_notes": "The second wording is a sparser message, written by Claude to represent a less informed owner who doesn't volunteer eating, drinking or behaviour.",
+      "scripted_answers": "We took her cone off recently after the nurse said she had healed well. I noticed the lump in the last day or so. I'm not sure what it is. I did wonder if it might be an abscess, but I don't know.",
+      "acceptable_codes": ["DEMO-015", "DEMO-005", "DEMO-007"],
+      "code_notes": "First run used the list without DEMO-015 (closest available: DEMO-005 Skin lesion). DEMO-015 Lump or swelling was added afterwards because this real case exposed the gap.",
+      "expected_urgency": "URGENT_24H",
+      "expected_photo": true,
+      "outcome_notes": "Not shown to the model. Seen by the vet the next day: a needle sample found pus, confirming an abscess. It was opened and drained, cleaned with saline, and treated with antibiotics. Recovered well at the 5-day check."
+    }
+  ]
+}
