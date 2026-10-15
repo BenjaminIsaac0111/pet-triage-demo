@@ -111,3 +111,18 @@ def log_conversation_record(
         },
         "triage_record.json",
     )
+
+
+def log_out_of_scope(history: list[BaseMessage], reason: str) -> None:
+    """Save the transcript of a conversation that was not triaged, and why.
+
+    Kept as triage_record.json, like a triaged conversation, so every run has
+    one file to read. Reviewing these is how a too-strict scope rule is caught.
+    """
+    mlflow.log_dict(
+        {
+            "transcript": [message.model_dump() for message in history],
+            "out_of_scope_reason": reason,
+        },
+        "triage_record.json",
+    )

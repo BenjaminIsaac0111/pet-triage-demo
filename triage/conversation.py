@@ -8,6 +8,11 @@ Turn 1, `start`: the owner describes the problem.
   - Otherwise the model asks 2-3 follow-up questions.
 Turn 2, `answer`: the owner answers, and the model fills the triage record.
 
+Either turn can instead end the conversation as out of scope: an animal the
+service doesn't cover, or something that isn't a health problem. A confirmed
+emergency is never turned away for being out of scope (see
+docs/adr/0006-out-of-scope-and-unlisted-complaints.md).
+
 Each turn returns a `TurnResult` whose `metrics` (timings, retries, safety
 checks) the callers log to MLflow: web_demo.py, terminal_chat.py, evaluate.py.
 """
@@ -25,20 +30,24 @@ from triage.chat_models import build_chat_model
 from triage.flag_recheck import RecheckResult, mark_unclear, recheck_lifted_flags
 from triage.reference_data import load_complaints
 from triage.safety_floor import SafetyFloorResult, apply_safety_floor, find_red_flags
-from triage.schemas import RedFlagCheck, TriageRecord
+from triage.schemas import RedFlagCheck, TriageRecord, is_in_scope, out_of_scope_reason
 from triage.settings import TriageSettings
 
 EMERGENCY_MESSAGE = (
     "This could be an emergency. Please contact your vet or nearest emergency vet now."
 )
+OUT_OF_SCOPE_MESSAGE = (
+    "Sorry, we can't triage this. If you're worried about an animal's health, please contact a vet."
+)
 
 
 @dataclass
 class TurnResult:
-    """What one turn produced: either questions for the owner, or the final record."""
+    """What one turn produced. Exactly one of questions, record or out_of_scope_reason is set."""
 
     questions: list[str] | None = None
     record: TriageRecord | None = None
+    out_of_scope_reason: str | None = None  # owner-facing; shown with OUT_OF_SCOPE_MESSAGE
     metrics: dict[str, float] = field(default_factory=dict)  # logged to MLflow by the caller
 
 
@@ -56,6 +65,14 @@ def _call_and_time(chain: Runnable, history: list[BaseMessage]) -> tuple[BaseMod
     started = time.perf_counter()
     reply, retries = invoke_with_retry(chain, history)
     return reply, retries, time.perf_counter() - started
+
+
+def _out_of_scope(reply: BaseModel, metrics: dict[str, float]) -> TurnResult:
+    """End the conversation without triaging, keeping the model's scope answers as metrics."""
+    return TurnResult(
+        out_of_scope_reason=out_of_scope_reason(reply),
+        metrics={**metrics, "out_of_scope": 1, "species_supported": int(reply.species != "other")},
+    )
 
 
 class TriageConversation:
@@ -110,8 +127,8 @@ class TriageConversation:
         early_assessment_metrics = {}
         if find_red_flags(owner_message):
             early = self._assess(skipped_questions=True)
-            if early.record.urgency_tier == "EMERGENCY":
-                return early
+            if early.record is None or early.record.urgency_tier == "EMERGENCY":
+                return early  # a confirmed emergency, or out of scope
             # The flag was lifted with evidence, so ask questions as usual. The
             # early assessment's numbers are logged under their own names.
             early_assessment_metrics = {f"early_{name}": v for name, v in early.metrics.items()}
@@ -128,17 +145,15 @@ class TriageConversation:
     def _ask_follow_up_questions(self, extra_metrics: dict[str, float]) -> TurnResult:
         chain = build_questions_chain(self.chat_model, self.settings.prompt_version)
         reply, retries, latency = _call_and_time(chain, self.history)
+        metrics = {"questions_latency_sec": latency, "questions_retries": retries, **extra_metrics}
+        if not is_in_scope(reply):
+            return _out_of_scope(reply, metrics)
 
         self.questions_asked = reply.clarifying_questions
         self.history.append(AIMessage(content="\n".join(self.questions_asked)))
         return TurnResult(
             questions=self.questions_asked,
-            metrics={
-                "questions_latency_sec": latency,
-                "questions_retries": retries,
-                "questions_count": len(self.questions_asked),
-                **extra_metrics,
-            },
+            metrics={**metrics, "questions_count": len(self.questions_asked)},
         )
 
     def _assess(self, skipped_questions: bool) -> TurnResult:
@@ -161,6 +176,9 @@ class TriageConversation:
             "safety_floor_applied": int(safety.floor.floor_raised_urgency),
             **(safety.recheck.metrics if safety.recheck else {}),
         }
+        # Safety beats scope: an emergency in any animal still gets "contact a vet now".
+        if record.urgency_tier != "EMERGENCY" and not is_in_scope(assessment):
+            return _out_of_scope(assessment, metrics)
         return TurnResult(record=record, metrics=metrics)
 
     def _apply_safety_rules(
@@ -206,6 +224,7 @@ class TriageConversation:
         return TriageRecord(
             complaint_code=assessment.complaint_code,
             complaint_term=load_complaints()[assessment.complaint_code].term,
+            species=assessment.species,
             urgency_tier=final_urgency,
             model_urgency_tier=assessment.urgency_tier,
             safety_floor_applied=safety.floor.floor_raised_urgency,

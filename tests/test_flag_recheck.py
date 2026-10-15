@@ -41,6 +41,8 @@ def sampling_chain(statuses):
         status = next(answers)
         flag_status = "absent" if status == "broken" else status
         return schema(
+            species="dog",
+            is_health_concern=True,
             red_flag_checks=[
                 {"flag_id": "breathing", "status": flag_status, "evidence_quote": "a b"}
             ],

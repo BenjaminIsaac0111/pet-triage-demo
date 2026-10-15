@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from triage.reference_data import (
     DATA_DIR,
     load_complaints,
+    load_edge_cases,
     load_evaluation_cases,
     load_red_flags,
 )
@@ -16,6 +17,8 @@ from triage.schemas import TriageRecord, build_assessment_schema, most_urgent
 
 def valid_assessment(**overrides):
     data = {
+        "species": "dog",
+        "is_health_concern": True,
         "red_flag_checks": [],
         "owner_summary": "Dog vomits yellow foam most mornings, otherwise well.",
         "complaint_code": "DEMO-001",
@@ -60,6 +63,22 @@ def test_evidence_fields_come_before_decision_fields():
     field_order = list(build_assessment_schema().model_json_schema()["properties"])
     assert field_order.index("owner_summary") < field_order.index("urgency_tier")
     assert field_order.index("red_flag_checks") < field_order.index("urgency_tier")
+
+
+def test_scope_is_decided_before_anything_else():
+    field_order = list(build_assessment_schema().model_fields)
+    assert field_order[:2] == ["species", "is_health_concern"]
+
+
+def test_unknown_species_is_rejected():
+    with pytest.raises(ValidationError):
+        build_assessment_schema()(**valid_assessment(species="raccoon"))
+
+
+def test_edge_cases_use_real_codes_and_outcomes():
+    for case in load_edge_cases():
+        assert case["expected_outcome"] in {"out_of_scope", "emergency", "triaged"}
+        assert set(case.get("acceptable_codes", [])) <= set(load_complaints())
 
 
 def test_most_urgent():

@@ -21,8 +21,10 @@ def flaky_chain(failures: int):
     def run(inputs):
         histories_seen.append(inputs["history"])
         if len(histories_seen) <= failures:
-            return FollowUpQuestions(clarifying_questions=[])  # too few: raises
-        return FollowUpQuestions(clarifying_questions=["How long?"])
+            return FollowUpQuestions(species="dog", is_health_concern=True, clarifying_questions=[])
+        return FollowUpQuestions(
+            species="dog", is_health_concern=True, clarifying_questions=["How long?"]
+        )
 
     return RunnableLambda(run), histories_seen
 
@@ -58,3 +60,7 @@ def test_every_prompt_version_has_both_prompts(version):
     assessment_prompt = load_prompt_text(version, "assessment")
     assert "{complaint_list}" in assessment_prompt
     assert "{red_flag_instructions}" in assessment_prompt
+
+
+def test_codes_without_owner_phrases_are_listed_plainly():
+    assert "  DEMO-000: Other / not listed" in describe_complaint_codes().splitlines()

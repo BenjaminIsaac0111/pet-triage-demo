@@ -6,6 +6,8 @@ Built with LangChain, a local model through Ollama (or your own model or API key
 
 **Prototype only.** The test cases are mostly synthetic and labelled by a non-vet. This shows the approach, not clinical safety.
 
+The service covers **cats and dogs only**, as an example scope. Anything else, or anything that isn't a health problem, is politely declined, except a likely emergency, which always gets "contact a vet now". Design decisions and their trade-offs are in [docs/adr](docs/adr/README.md).
+
 ```mermaid
 graph LR
     A[Owner's message] --> B{Keyword check}
@@ -38,8 +40,9 @@ graph LR
 | `triage/mlflow_tracking.py` | What gets logged to MLflow |
 | `evaluate.py` + `triage/scoring.py` | Runs the test cases and scores them |
 | `web_demo.py`, `terminal_chat.py` | Thin front ends over the same conversation code |
-| `prompts/v1`, `prompts/v2` | Prompt wording, kept out of the code so versions can be compared |
-| `data/` | Complaint codes, emergency phrases and test cases |
+| `prompts/v1` … `v3` | Prompt wording, kept out of the code so versions can be compared (v3, the default, adds the scope check) |
+| `docs/adr/` | Design decisions: what was decided, the alternatives, and the trade-offs |
+| `data/` | Complaint codes, emergency phrases, test cases and edge cases |
 
 `triage/__init__.py` lists the smaller supporting modules. Planned improvements are marked `TODO` in the code, next to where they'd go.
 
@@ -75,7 +78,7 @@ ollama pull qwen2.5:7b             # skip if you use your own model or API
 |---|---|
 | Web demo | `streamlit run web_demo.py` |
 | Terminal chat | `python terminal_chat.py` |
-| Test cases, logged to MLflow | `python evaluate.py` (`--prompt-version v1` to compare, `--baseline lexical` for rules only) |
+| Test cases, logged to MLflow | `python evaluate.py` (`--prompt-version v1` to compare, `--baseline lexical` for rules only, `--edge-cases` for scope checks) |
 | Unit tests (no model needed) | `pytest` (`-m live` to also test against the real model) |
 | MLflow UI | `mlflow ui --backend-store-uri sqlite:///mlflow.db` |
 

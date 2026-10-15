@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from triage.scoring import EvaluationTally, score_record
+from triage.scoring import EvaluationTally, score_edge_case, score_record, turn_outcome
 
 BLOAT_CASE = {
     "acceptable_codes": ["DEMO-002", "DEMO-011"],
@@ -61,3 +61,32 @@ def test_tally_counts_emergencies_and_failures():
     assert tally.counts["emergencies_caught"] == 1
     assert tally.counts["emergencies_caught_by_model_alone"] == 0
     assert tally.counts["schema_failures"] == 1
+
+
+def turn(outcome, code="DEMO-001"):
+    if outcome == "out_of_scope":
+        return SimpleNamespace(out_of_scope_reason="not a cat or dog", record=None)
+    urgency = "EMERGENCY" if outcome == "emergency" else "ROUTINE"
+    return SimpleNamespace(
+        out_of_scope_reason=None,
+        record=SimpleNamespace(urgency_tier=urgency, complaint_code=code),
+    )
+
+
+def test_edge_case_outcomes():
+    assert turn_outcome(turn("out_of_scope")) == "out_of_scope"
+    assert turn_outcome(turn("emergency")) == "emergency"
+    assert turn_outcome(turn("triaged")) == "triaged"
+
+
+def test_edge_case_scores_outcome_and_optional_code():
+    case = {"expected_outcome": "triaged", "acceptable_codes": ["DEMO-000"]}
+    assert score_edge_case(case, turn("triaged", "DEMO-000")) == {
+        "outcome_match": 1,
+        "code_match": 1,
+    }
+    assert score_edge_case(case, turn("triaged", "DEMO-004"))["code_match"] == 0
+    assert score_edge_case(case, turn("out_of_scope")) == {"outcome_match": 0, "code_match": 0}
+    assert score_edge_case({"expected_outcome": "out_of_scope"}, turn("out_of_scope")) == {
+        "outcome_match": 1
+    }

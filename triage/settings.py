@@ -28,8 +28,9 @@ class TriageSettings:
     # 0 means the model always picks its most likely answer, which keeps runs repeatable.
     temperature: float = field(default_factory=lambda: float(_from_env("TRIAGE_TEMPERATURE", "0")))
 
-    # Which folder under prompts/ to use. v2 fixed v1's failures (see the README).
-    prompt_version: str = field(default_factory=lambda: _from_env("TRIAGE_PROMPT_VERSION", "v2"))
+    # Which folder under prompts/ to use. v2 fixed v1's failures (see the README);
+    # v3 adds the scope check and the "Other" code (docs/adr/0006).
+    prompt_version: str = field(default_factory=lambda: _from_env("TRIAGE_PROMPT_VERSION", "v3"))
 
     # Only for Ollama on another machine. OpenAI-compatible servers use
     # OPENAI_BASE_URL, which their SDK reads directly.

@@ -15,6 +15,7 @@
     {"code": "DEMO-012", "term": "Sneezing", "category": "Respiratory", "synonyms": ["sneezing", "runny nose", "snotty"]},
     {"code": "DEMO-013", "term": "Eye discharge", "category": "Eye", "synonyms": ["gunky eye", "weepy eye", "squinting", "red eye"]},
     {"code": "DEMO-014", "term": "Seizure", "category": "Neurological", "synonyms": ["fit", "fitting", "shaking and paddling", "convulsing"]},
-    {"code": "DEMO-015", "term": "Lump or swelling", "category": "Skin", "synonyms": ["lump", "bump", "swelling", "growth", "mass"]}
+    {"code": "DEMO-015", "term": "Lump or swelling", "category": "Skin", "synonyms": ["lump", "bump", "swelling", "growth", "mass"]},
+    {"code": "DEMO-000", "term": "Other / not listed", "category": "Other", "synonyms": []}
   ]
 }

@@ -11,6 +11,7 @@ Usage:
   python evaluate.py --model qwen2.5:7b --limit 2
   python evaluate.py --case RC01             # only cases whose id contains "RC01"
   python evaluate.py --baseline lexical      # rules only, no model
+  python evaluate.py --edge-cases            # scope and unlisted-complaint checks
 """
 
 # TODO: Add vet-labelled cases that no prompt has been tuned on, and report
@@ -25,8 +26,8 @@ from dotenv import load_dotenv
 from triage import mlflow_tracking
 from triage.conversation import TriageConversation
 from triage.lexical_baseline import triage_with_rules_only
-from triage.reference_data import load_evaluation_cases
-from triage.scoring import EvaluationTally, score_record
+from triage.reference_data import load_edge_cases, load_evaluation_cases
+from triage.scoring import EvaluationTally, score_edge_case, score_record, turn_outcome
 from triage.settings import TriageSettings
 
 
@@ -39,7 +40,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--baseline", choices=["lexical"], help="Score a rules-only baseline instead of the model."
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--edge-cases",
+        action="store_true",
+        help="Run data/edge_cases.json (scope, unlisted complaints) instead of the main cases.",
+    )
+    args = parser.parse_args()
+    if args.edge_cases and args.baseline:
+        parser.error("--edge-cases needs a model; the rules-only baseline has no scope check")
+    return args
 
 
 def settings_from_arguments(args: argparse.Namespace) -> TriageSettings:
@@ -65,7 +74,7 @@ def select_cases(args: argparse.Namespace) -> list[dict]:
 def run_with_model(settings: TriageSettings, case: dict, owner_message: str):
     """Hold the conversation, answering any questions with the case's scripted answers.
 
-    Returns the final record and the seconds taken.
+    Returns the last turn (a record, or an out-of-scope reason) and the seconds taken.
     """
     started = time.perf_counter()
     conversation = TriageConversation(settings)
@@ -74,8 +83,11 @@ def run_with_model(settings: TriageSettings, case: dict, owner_message: str):
     if turn.questions:
         turn = conversation.answer(case["scripted_answers"])
         mlflow_tracking.log_turn_metrics(turn.metrics)
-    mlflow_tracking.log_conversation_record(conversation.history, turn.record)
-    return turn.record, time.perf_counter() - started
+    if turn.out_of_scope_reason:
+        mlflow_tracking.log_out_of_scope(conversation.history, turn.out_of_scope_reason)
+    else:
+        mlflow_tracking.log_conversation_record(conversation.history, turn.record)
+    return turn, time.perf_counter() - started
 
 
 def run_with_rules_only(case: dict, owner_message: str):
@@ -109,13 +121,21 @@ def evaluate_one_wording(
             if use_baseline:
                 record, seconds = run_with_rules_only(case, owner_message)
             else:
-                record, seconds = run_with_model(settings, case, owner_message)
+                turn, seconds = run_with_model(settings, case, owner_message)
+                record = turn.record
         except Exception as error:  # a reply that never fitted the schema is a result, not a crash
             mlflow.log_metric("schema_valid", 0)
             mlflow.set_tag("error", str(error)[:500])
             tally.add_failed_run()
             result_rows.append({"run": run_name, "error": str(error)[:80]})
             print(f"{run_name:32} FAILED: {str(error)[:80]}")
+            return
+
+        if record is None:  # every main case is a cat or dog health problem: a false refusal
+            mlflow.log_metrics({"schema_valid": 1, "wrongly_out_of_scope": 1})
+            tally.add_wrongly_out_of_scope_run()
+            result_rows.append({"run": run_name, "error": "wrongly out of scope"})
+            print(f"{run_name:32} WRONGLY OUT OF SCOPE: {turn.out_of_scope_reason}")
             return
 
         scores = score_record(case, record)
@@ -147,10 +167,45 @@ def print_result_line(run_name: str, case: dict, record, scores: dict, seconds: 
     )
 
 
+def run_edge_cases(settings: TriageSettings, case_filter: str | None) -> None:
+    """Run data/edge_cases.json: one wording each, scored on outcome (and code where given)."""
+    cases = [c for c in load_edge_cases() if not case_filter or case_filter in c["case_id"]]
+    mlflow_tracking.start_tracking("pet-triage-edge-cases")
+    totals = {"runs": 0, "outcome_match": 0, "code_cases": 0, "code_match": 0}
+    with mlflow_tracking.tracked_run(
+        settings, run_name=f"{settings.model_name} | prompt {settings.prompt_version}"
+    ):
+        for case in cases:
+            with mlflow_tracking.tracked_run(settings, run_name=case["case_id"], nested=True):
+                mlflow.set_tags({"case_id": case["case_id"], "expected": case["expected_outcome"]})
+                turn, seconds = run_with_model(settings, case, case["owner_message"])
+                scores = score_edge_case(case, turn)
+                mlflow.log_metrics({"total_latency_sec": seconds, **scores})
+                totals["runs"] += 1
+                totals["outcome_match"] += scores["outcome_match"]
+                if "code_match" in scores:
+                    totals["code_cases"] += 1
+                    totals["code_match"] += scores["code_match"]
+                code = turn.record.complaint_code if turn.record else "-"
+                verdict = "ok" if all(scores.values()) else "MISS"
+                print(
+                    f"{case['case_id']:30} {verdict:4}  got {turn_outcome(turn):12}"
+                    f" expected {case['expected_outcome']:12} code={code}  {seconds:.1f}s"
+                )
+        mlflow.log_metrics({name: float(count) for name, count in totals.items()})
+    print(
+        f"\nedge cases: outcome {totals['outcome_match']}/{totals['runs']},"
+        f" code {totals['code_match']}/{totals['code_cases']}"
+    )
+
+
 def main() -> None:
     load_dotenv()
     args = parse_arguments()
     settings = settings_from_arguments(args)
+    if args.edge_cases:
+        run_edge_cases(settings, args.case)
+        return
     cases = select_cases(args)
 
     mlflow_tracking.start_tracking("pet-triage-eval")

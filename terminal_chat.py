@@ -12,7 +12,7 @@ import mlflow
 from dotenv import load_dotenv
 
 from triage import mlflow_tracking
-from triage.conversation import EMERGENCY_MESSAGE, TriageConversation
+from triage.conversation import EMERGENCY_MESSAGE, OUT_OF_SCOPE_MESSAGE, TriageConversation
 from triage.schemas import TriageRecord
 
 
@@ -49,6 +49,10 @@ def hold_one_conversation(conversation: TriageConversation) -> None:
             mlflow.log_metric("schema_valid", 0)
             raise
         mlflow.log_metrics({"schema_valid": 1, "total_latency_sec": time.perf_counter() - started})
+        if turn.out_of_scope_reason:
+            mlflow_tracking.log_out_of_scope(conversation.history, turn.out_of_scope_reason)
+            print(f"\n{turn.out_of_scope_reason} {OUT_OF_SCOPE_MESSAGE}")
+            return
         mlflow_tracking.log_conversation_record(conversation.history, turn.record)
         show_record(turn.record)
 

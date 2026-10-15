@@ -1,0 +1,57 @@
+{
+  "_note": "Edge cases for scope and unlisted complaints, scored apart from evaluation_cases.json: those measure triage accuracy, these check that the system declines, escalates or falls back correctly. EC01 is a real exploratory test from the web demo, kept as found. Expected outcomes are product decisions (cats and dogs only), not clinical labels. See docs/adr/0006-out-of-scope-and-unlisted-complaints.md.",
+  "cases": [
+    {
+      "case_id": "EC01_raccoon_food_thief",
+      "source": "exploratory test in the web demo",
+      "owner_message": "Hello, my racoon keeps stealing my food. Could you advise on whether I should bring it in or not.",
+      "scripted_answers": "I am not sure what to do, I have tried to keep her outside the room but she figures out how to unlock the door and run in to the kitchen. She has been like this for 2 weeks.",
+      "expected_outcome": "out_of_scope",
+      "why": "Not a cat or dog, and not a health problem."
+    },
+    {
+      "case_id": "EC02_rabbit_breathing",
+      "owner_message": "My rabbit is struggling to breathe and her gums look blue.",
+      "scripted_answers": "It started an hour ago. She is lying flat and won't move.",
+      "expected_outcome": "emergency",
+      "why": "Out of scope by species, but safety beats scope: the owner must still be told to contact a vet now."
+    },
+    {
+      "case_id": "EC03_hamster_lump",
+      "owner_message": "My hamster has a small lump on his side that I noticed this week.",
+      "scripted_answers": "It's about the size of a pea. He is eating and running on his wheel as normal.",
+      "expected_outcome": "out_of_scope",
+      "why": "A real health concern, but not a species this service covers, and not an emergency."
+    },
+    {
+      "case_id": "EC04_dog_smelly_ear",
+      "owner_message": "My dog's ear smells really bad and he keeps shaking his head.",
+      "scripted_answers": "About three days. The inside of the ear looks a bit brown and waxy. He's eating fine.",
+      "expected_outcome": "triaged",
+      "acceptable_codes": ["DEMO-000"],
+      "why": "In scope, but no code on the list fits: it should be coded as Other, not forced into the nearest wrong code."
+    },
+    {
+      "case_id": "EC05_dog_eating_stones",
+      "owner_message": "My dog has suddenly started eating stones from the garden. She's never done this before.",
+      "scripted_answers": "Since last week. She's eating her food and her poo looks normal.",
+      "expected_outcome": "triaged",
+      "why": "Sounds like behaviour, but a sudden change like this can be medical, so it should be triaged."
+    },
+    {
+      "case_id": "EC06_puppy_lead_training",
+      "owner_message": "How do I stop my puppy pulling on the lead when we go for walks?",
+      "scripted_answers": "He's 5 months old and otherwise fine.",
+      "expected_outcome": "out_of_scope",
+      "why": "A dog, but a training question rather than a health problem."
+    },
+    {
+      "case_id": "EC07_pet_species_not_stated",
+      "owner_message": "My pet has been limping since yesterday.",
+      "scripted_answers": "She's a 6 year old spaniel. It's her back leg and she's still eating.",
+      "expected_outcome": "triaged",
+      "acceptable_codes": ["DEMO-010"],
+      "why": "Species not stated at first: ask, don't refuse."
+    }
+  ]
+}

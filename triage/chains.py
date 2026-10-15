@@ -33,7 +33,8 @@ def load_prompt_text(prompt_version: str, prompt_name: str) -> str:
 def describe_complaint_codes() -> str:
     """The complaint list as prompt text, with owner synonyms to help the model match."""
     return "\n".join(
-        f"  {c.code}: {c.term} (owners may say: {', '.join(c.synonyms)})"
+        f"  {c.code}: {c.term}"
+        + (f" (owners may say: {', '.join(c.synonyms)})" if c.synonyms else "")
         for c in load_complaints().values()
     )
 

@@ -55,3 +55,8 @@ def load_red_flags(path: Path = DATA_DIR / "red_flags.json") -> dict[str, RedFla
 def load_evaluation_cases(path: Path = DATA_DIR / "evaluation_cases.json") -> list[dict]:
     """Return the test conversations used by evaluate.py and the demo's example buttons."""
     return json.loads(path.read_text(encoding="utf-8"))["cases"]
+
+
+def load_edge_cases(path: Path = DATA_DIR / "edge_cases.json") -> list[dict]:
+    """Return the scope and unlisted-complaint cases used by `evaluate.py --edge-cases`."""
+    return json.loads(path.read_text(encoding="utf-8"))["cases"]

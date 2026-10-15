@@ -58,6 +58,11 @@ class EvaluationTally:
                 record.model_urgency_tier == "EMERGENCY"
             )
 
+    def add_wrongly_out_of_scope_run(self) -> None:
+        """A main case (always a cat or dog health problem) that was refused as out of scope."""
+        self.counts["runs"] += 1
+        self.counts["wrongly_out_of_scope"] += 1
+
     def add_failed_run(self) -> None:
         """A reply that never fitted the schema, even after the retry."""
         self.counts["runs"] += 1
@@ -76,7 +81,28 @@ class EvaluationTally:
             f"  urgency exact match:    {c['urgency_match']}/{runs}",
             f"  photo flag correct:     {c['photo_match']}/{runs}",
             f"  schema failures:        {c['schema_failures']}/{runs}",
+            f"  wrongly out of scope:   {c['wrongly_out_of_scope']}/{runs}",
             f"  by wording (first / reworded): code {c['code_match_wording0']}"
             f" / {c['code_match_wording1']}, urgency {c['urgency_match_wording0']}"
             f" / {c['urgency_match_wording1']}",
         ]
+
+
+def turn_outcome(turn) -> str:
+    """How a conversation ended: "out_of_scope", "emergency" or "triaged"."""
+    if turn.out_of_scope_reason:
+        return "out_of_scope"
+    return "emergency" if turn.record.urgency_tier == "EMERGENCY" else "triaged"
+
+
+def score_edge_case(case: dict, turn) -> dict[str, int]:
+    """Score one edge case from data/edge_cases.json. Each score is 1 (yes) or 0 (no).
+
+    Only the outcome is always scored; the code is scored if the case lists
+    acceptable codes and the conversation produced a record.
+    """
+    scores = {"outcome_match": int(turn_outcome(turn) == case["expected_outcome"])}
+    if "acceptable_codes" in case:
+        code = turn.record.complaint_code if turn.record else None
+        scores["code_match"] = int(code in case["acceptable_codes"])
+    return scores

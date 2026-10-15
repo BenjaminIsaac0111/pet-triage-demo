@@ -20,7 +20,12 @@ from PIL import Image, ImageDraw
 
 from triage import mlflow_tracking
 from triage.chains import PROMPTS_DIR
-from triage.conversation import EMERGENCY_MESSAGE, TriageConversation, TurnResult
+from triage.conversation import (
+    EMERGENCY_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
+    TriageConversation,
+    TurnResult,
+)
 from triage.reference_data import load_evaluation_cases
 from triage.settings import TriageSettings
 
@@ -41,7 +46,10 @@ URGENCY_DISPLAY = {
 def reset_state() -> None:
     """Start a fresh conversation."""
     state = st.session_state
-    state.stage = "describe"  # describe -> questions -> photo (only if requested) -> done
+    # describe -> questions -> photo (only if requested) -> done,
+    # or straight to out_of_scope from either of the first two.
+    state.stage = "describe"
+    state.out_of_scope_reason = None  # set if the conversation ends without triage
     state.messages = []  # (role, text) pairs shown in the chat
     state.conversation = None  # the TriageConversation in progress
     state.run_id = None  # the MLflow run this conversation logs to
@@ -101,6 +109,9 @@ def show_turn(turn: TurnResult | None) -> None:
         )
         state.stage = "questions"
         return
+    if turn.out_of_scope_reason:
+        end_out_of_scope(turn.out_of_scope_reason)
+        return
 
     state.record = turn.record
     if state.record.urgency_tier != "EMERGENCY" and state.record.requires_photo_upload:
@@ -113,6 +124,17 @@ def show_turn(turn: TurnResult | None) -> None:
         state.stage = "photo"
     else:
         finish_conversation()
+
+
+def end_out_of_scope(reason: str) -> None:
+    """Tell the owner this can't be triaged, and log the conversation."""
+    state = st.session_state
+    state.out_of_scope_reason = reason
+    state.messages.append(("assistant", f"{reason} {OUT_OF_SCOPE_MESSAGE}"))
+    with mlflow.start_run(run_id=state.run_id):
+        mlflow.log_metric("schema_valid", 1)
+        mlflow_tracking.log_out_of_scope(state.conversation.history, reason)
+    state.stage = "out_of_scope"
 
 
 def finish_conversation(photo: tuple[str, bytes] | None = None) -> None:
@@ -238,6 +260,9 @@ def render_owner_view(settings: TriageSettings) -> None:
         show_box, advice = URGENCY_DISPLAY[state.record.urgency_tier]
         show_box(advice)
         st.button("Start a new conversation", on_click=reset_state)
+    elif state.stage == "out_of_scope":
+        st.info(f"Not triaged. {OUT_OF_SCOPE_MESSAGE}")
+        st.button("Start a new conversation", on_click=reset_state)
 
 
 def render_vet_view() -> None:
@@ -245,6 +270,9 @@ def render_vet_view() -> None:
     state = st.session_state
     record = state.record
     st.subheader("Vet's view: triage record")
+    if state.out_of_scope_reason:
+        st.info(f"No record: not triaged. {state.out_of_scope_reason}")
+        return
     if record is None:
         st.caption("The record appears here once the assistant has enough information.")
         return

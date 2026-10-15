@@ -27,14 +27,48 @@ URGENCY_RANK: dict[str, int] = {"ROUTINE": 0, "URGENT_24H": 1, "EMERGENCY": 2}
 FlagStatus = Literal["present", "absent", "unclear"]
 
 
+# Which animals the service covers. A product decision, not a model one: the
+# service this demo is modelled on focuses on cats and dogs. See
+# docs/adr/0006-out-of-scope-and-unlisted-complaints.md.
+Species = Literal["dog", "cat", "other", "not stated"]
+SUPPORTED_SPECIES = ("dog", "cat", "not stated")  # "not stated": ask, don't refuse
+
+# Shared by both model replies, and placed first so the model decides scope
+# before it writes anything else.
+SPECIES_FIELD = Field(
+    description="The animal the owner is asking about: dog, cat, other (any other animal, "
+    "including wild animals) or not stated."
+)
+HEALTH_CONCERN_FIELD = Field(
+    description="True if the owner describes a possible health or welfare problem with "
+    "their animal, including a change in behaviour that could be medical (e.g. eating "
+    "stones, sudden aggression). False if they want something else, e.g. help with "
+    "training, keeping an animal out of the house, or general chat."
+)
+
+
+def is_in_scope(reply: BaseModel) -> bool:
+    """Whether a model reply describes something this service should triage."""
+    return reply.species in SUPPORTED_SPECIES and reply.is_health_concern
+
+
+def out_of_scope_reason(reply: BaseModel) -> str:
+    """A short, owner-facing reason for not triaging. Only call when out of scope."""
+    if reply.species not in SUPPORTED_SPECIES:
+        return "This service can only help with cats and dogs."
+    return "This doesn't sound like a health problem we can assess."
+
+
 def most_urgent(*tiers: str) -> str:
     """Return the most urgent of the given tiers."""
     return max(tiers, key=URGENCY_RANK.__getitem__)
 
 
 class FollowUpQuestions(BaseModel):
-    """Turn 1: what the assistant asks the owner."""
+    """Turn 1: what the assistant asks the owner, after deciding whether to triage at all."""
 
+    species: Species = SPECIES_FIELD
+    is_health_concern: bool = HEALTH_CONCERN_FIELD
     clarifying_questions: list[str] = Field(
         description="2 or 3 short, kind, plain-English questions for the owner.",
         min_length=1,
@@ -83,6 +117,8 @@ def build_assessment_schema(detected_flag_ids: list[str] | None = None) -> type[
     # evidence and summary come before the decisions that should rest on them.
     return create_model(
         "TriageAssessment",
+        species=(Species, SPECIES_FIELD),
+        is_health_concern=(bool, HEALTH_CONCERN_FIELD),
         red_flag_checks=(
             list[check_schema],
             Field(
@@ -99,7 +135,10 @@ def build_assessment_schema(detected_flag_ids: list[str] | None = None) -> type[
         ),
         complaint_code=(
             Literal[allowed_codes],
-            Field(description="The single closest presenting complaint code from the list."),
+            Field(
+                description="The single closest presenting complaint code from the list, "
+                "or DEMO-000 if none of them fits."
+            ),
         ),
         requires_photo_upload=(
             bool,
@@ -115,6 +154,7 @@ class TriageRecord(BaseModel):
 
     complaint_code: str
     complaint_term: str  # looked up from the code, not written by the model
+    species: Species = "not stated"  # defaulted so records from older runs still load
     urgency_tier: UrgencyTier  # the final urgency, after the safety floor
     model_urgency_tier: UrgencyTier  # what the model said, kept to see when the floor stepped in
     safety_floor_applied: bool
