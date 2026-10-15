@@ -154,7 +154,7 @@ ss = st.session_state
 with st.sidebar:
     st.header("Settings")
     defaults = ModelConfig()
-    model_name = st.text_input("Ollama model", defaults.model_name)
+    model_name = st.text_input(f"Model ({defaults.provider})", defaults.model_name)
     versions = sorted(p.name for p in Path(PROMPTS_DIR).iterdir() if p.is_dir())
     prompt_version = st.selectbox(
         "Prompt version", versions, index=versions.index(defaults.prompt_version)

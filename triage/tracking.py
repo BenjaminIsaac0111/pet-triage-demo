@@ -46,8 +46,14 @@ def model_digest(model_name: str, base_url: str | None = None) -> str:
 
 def config_params(config: ModelConfig) -> dict[str, str | float]:
     return {
+        "provider": config.provider,
         "model_name": config.model_name,
-        "model_digest": model_digest(config.model_name, config.base_url),
+        # Hosted providers don't expose weights ids; their model names are versioned instead.
+        "model_digest": (
+            model_digest(config.model_name, config.base_url)
+            if config.provider == "ollama"
+            else "n/a"
+        ),
         "temperature": config.temperature,
         "prompt_version": config.prompt_version,
         "lift_check_samples": config.lift_check_samples,

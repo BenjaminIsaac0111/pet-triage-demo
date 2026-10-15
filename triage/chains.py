@@ -15,12 +15,14 @@ from triage.reference_data import load_complaints, load_red_flags
 from triage.schemas import FollowUpQuestions, build_assessment_model
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+PROVIDERS = ("ollama", "openai", "anthropic")
 
 
 @dataclass
 class ModelConfig:
     """Everything that changes the model's behaviour. Logged to MLflow as params."""
 
+    provider: str = field(default_factory=lambda: os.getenv("TRIAGE_PROVIDER", "ollama"))
     model_name: str = field(default_factory=lambda: os.getenv("TRIAGE_MODEL", "qwen2.5:7b"))
     temperature: float = field(default_factory=lambda: float(os.getenv("TRIAGE_TEMPERATURE", "0")))
     prompt_version: str = field(default_factory=lambda: os.getenv("TRIAGE_PROMPT_VERSION", "v2"))
@@ -39,17 +41,33 @@ class ModelConfig:
 
 
 def build_llm(config: ModelConfig) -> BaseChatModel:
-    """Local model via Ollama. Swap this function to use a hosted provider."""
-    from langchain_ollama import ChatOllama
+    """The chat model for TRIAGE_PROVIDER. Everything downstream is provider-agnostic.
 
-    kwargs = {
-        "model": config.model_name,
-        "temperature": config.temperature,
-        "client_kwargs": {"timeout": config.timeout_sec},
-    }
-    if config.base_url:
-        kwargs["base_url"] = config.base_url
-    return ChatOllama(**kwargs)
+    - ollama: a local model (default). OLLAMA_BASE_URL points at another server.
+    - openai: OpenAI, or any OpenAI-compatible server (LM Studio, vLLM) via
+      OPENAI_BASE_URL. Needs OPENAI_API_KEY.
+    - anthropic: Claude. Needs ANTHROPIC_API_KEY.
+
+    API keys are read by each provider's SDK from the environment (or .env),
+    never passed through our code or logged.
+    """
+    common = {"model": config.model_name, "temperature": config.temperature}
+    if config.provider == "ollama":
+        from langchain_ollama import ChatOllama
+
+        kwargs = {**common, "client_kwargs": {"timeout": config.timeout_sec}}
+        if config.base_url:
+            kwargs["base_url"] = config.base_url
+        return ChatOllama(**kwargs)
+    if config.provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(**common, timeout=config.timeout_sec)
+    if config.provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(**common, timeout=config.timeout_sec)
+    raise ValueError(f"Unknown TRIAGE_PROVIDER {config.provider!r}; use one of {PROVIDERS}")
 
 
 def _load_prompt(version: str, name: str) -> str:

@@ -2,7 +2,7 @@
 
 A pet owner describes a problem in their own words. The assistant asks 2–3 follow-up questions, then writes a short record for the vet: a complaint code, an urgency level (EMERGENCY, URGENT_24H or ROUTINE), and whether a photo would help. It never diagnoses or suggests treatment.
 
-Built with LangChain and a local model via Ollama. Every conversation is tracked in MLflow, which I used to compare prompt versions on a small set of test cases.
+Built with LangChain and a local model via Ollama (or your own model or API key; see below). Every conversation is tracked in MLflow, which I used to compare prompt versions on a small set of test cases.
 
 **Prototype only.** The test cases are mostly synthetic and labelled by a non-vet. This shows the approach, not clinical safety.
 
@@ -20,14 +20,26 @@ graph LR
 
 ## Quick start
 
-Needs Python 3.11+ and [Ollama](https://ollama.com).
+Needs Python 3.11+ and [Ollama](https://ollama.com) (or an API key; see below).
 
 ```bash
 ollama pull qwen2.5:7b
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pre-commit install                 # secret scan + lint on commit, tests on push
 ```
+
+**Your own model or API.** Copy `.env.example` to `.env` and set `TRIAGE_PROVIDER` and `TRIAGE_MODEL`:
+
+| Provider | Set |
+|---|---|
+| Any Ollama model (default) | `TRIAGE_MODEL=<name from ollama list>` |
+| Anthropic | `TRIAGE_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` |
+| OpenAI | `TRIAGE_PROVIDER=openai`, `OPENAI_API_KEY` |
+| Your own server with an OpenAI-compatible API (LM Studio, vLLM) | `TRIAGE_PROVIDER=openai`, `OPENAI_BASE_URL` |
+
+`.env` is git-ignored, and keys are read by each provider's SDK, never logged to MLflow. The provider and model are logged as run params, so runs on different models compare side by side.
 
 | | |
 |---|---|
@@ -42,7 +54,7 @@ Settings (model, prompt version and so on) are optional; see `.env.example`.
 
 **With Docker** (app and Ollama together): `docker compose up -d`, then `docker compose exec ollama ollama pull qwen2.5:7b`, and open http://localhost:8501.
 
-GitHub Actions runs the linter, the tests on Python 3.11 and 3.13, and a Docker build on every push.
+**Before code leaves your machine**, `pre-commit` runs [gitleaks](https://github.com/gitleaks/gitleaks) (secret scan) and ruff on every commit, and the unit tests on every push. Run them all by hand with `pre-commit run --all-files --hook-stage pre-push`. GitHub Actions then runs the linter, the tests on Python 3.11 and 3.13, and a Docker build on every push.
 
 ## How it works
 

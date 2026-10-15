@@ -83,6 +83,7 @@ def main() -> None:
         config.model_name = args.model
     if args.baseline:
         # Shows up in the same MLflow columns as the LLM runs, so they sort side by side.
+        config.provider = "none"
         config.model_name = f"baseline:{args.baseline}"
         config.prompt_version = "none"
 
