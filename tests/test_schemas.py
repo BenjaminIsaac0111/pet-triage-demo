@@ -1,10 +1,17 @@
+"""The schema must keep the model to our codes, and the data files must agree with each other."""
+
 import json
 
 import pytest
 from pydantic import ValidationError
 
-from triage.reference_data import DATA_DIR, load_complaints, load_golden_cases, load_red_flags
-from triage.schemas import TriageRecord, build_assessment_model
+from triage.reference_data import (
+    DATA_DIR,
+    load_complaints,
+    load_evaluation_cases,
+    load_red_flags,
+)
+from triage.schemas import TriageRecord, build_assessment_schema, most_urgent
 
 
 def valid_assessment(**overrides):
@@ -20,45 +27,44 @@ def valid_assessment(**overrides):
 
 
 def test_assessment_accepts_known_code():
-    model = build_assessment_model()
-    assert model(**valid_assessment()).complaint_code == "DEMO-001"
+    schema = build_assessment_schema()
+    assert schema(**valid_assessment()).complaint_code == "DEMO-001"
 
 
 def test_assessment_rejects_invented_code():
-    model = build_assessment_model()
     with pytest.raises(ValidationError):
-        model(**valid_assessment(complaint_code="DEMO-999"))
+        build_assessment_schema()(**valid_assessment(complaint_code="DEMO-999"))
 
 
 def test_assessment_rejects_unknown_urgency():
-    model = build_assessment_model()
     with pytest.raises(ValidationError):
-        model(**valid_assessment(urgency_tier="SOMETIME"))
+        build_assessment_schema()(**valid_assessment(urgency_tier="SOMETIME"))
 
 
 def test_codes_are_an_enum_in_the_json_schema():
-    # This enum is what Ollama uses to constrain generation.
-    schema = build_assessment_model().model_json_schema()
-    assert set(schema["properties"]["complaint_code"]["enum"]) == set(load_complaints())
+    # This enum is what Ollama uses to constrain the model while it writes.
+    json_schema = build_assessment_schema().model_json_schema()
+    assert set(json_schema["properties"]["complaint_code"]["enum"]) == set(load_complaints())
 
 
 def test_flag_ids_limited_to_detected_flags():
-    model = build_assessment_model(flag_ids=["breathing"])
-    ok = valid_assessment(
-        red_flag_checks=[{"flag_id": "breathing", "status": "absent", "evidence_quote": "x y"}]
-    )
-    model(**ok)
-    bad = valid_assessment(
-        red_flag_checks=[{"flag_id": "seizure", "status": "absent", "evidence_quote": "x y"}]
-    )
+    schema = build_assessment_schema(["breathing"])
+    asked_about = {"flag_id": "breathing", "status": "absent", "evidence_quote": "x y"}
+    schema(**valid_assessment(red_flag_checks=[asked_about]))
+    not_asked_about = {"flag_id": "seizure", "status": "absent", "evidence_quote": "x y"}
     with pytest.raises(ValidationError):
-        model(**bad)
+        schema(**valid_assessment(red_flag_checks=[not_asked_about]))
 
 
 def test_evidence_fields_come_before_decision_fields():
-    order = list(build_assessment_model().model_json_schema()["properties"])
-    assert order.index("owner_summary") < order.index("urgency_tier")
-    assert order.index("red_flag_checks") < order.index("urgency_tier")
+    field_order = list(build_assessment_schema().model_json_schema()["properties"])
+    assert field_order.index("owner_summary") < field_order.index("urgency_tier")
+    assert field_order.index("red_flag_checks") < field_order.index("urgency_tier")
+
+
+def test_most_urgent():
+    assert most_urgent("ROUTINE", "EMERGENCY", "URGENT_24H") == "EMERGENCY"
+    assert most_urgent("ROUTINE", "URGENT_24H") == "URGENT_24H"
 
 
 def test_record_rejects_unknown_code():
@@ -79,13 +85,13 @@ def test_record_rejects_unknown_code():
         )
 
 
-def test_golden_cases_reference_real_codes():
+def test_evaluation_cases_use_real_codes():
     codes = set(load_complaints())
-    for case in load_golden_cases():
+    for case in load_evaluation_cases():
         assert set(case["acceptable_codes"]) <= codes, case["case_id"]
 
 
 def test_red_flag_ids_are_unique():
     raw = json.loads((DATA_DIR / "red_flags.json").read_text(encoding="utf-8"))
-    ids = [f["id"] for f in raw["red_flags"]]
+    ids = [flag["id"] for flag in raw["red_flags"]]
     assert len(ids) == len(set(ids)) == len(load_red_flags())
