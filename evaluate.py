@@ -7,6 +7,7 @@ Usage:
   python evaluate.py                       # uses TRIAGE_PROMPT_VERSION or v1
   python evaluate.py --prompt-version v2
   python evaluate.py --model qwen2.5:7b --limit 2
+  python evaluate.py --baseline lexical    # rules only, no LLM, for comparison
 """
 
 import argparse
@@ -17,6 +18,7 @@ import mlflow
 from dotenv import load_dotenv
 
 from triage import tracking
+from triage.baselines import lexical_triage
 from triage.chains import ModelConfig
 from triage.core import TriageSession
 from triage.reference_data import load_golden_cases
@@ -53,6 +55,15 @@ def run_case(config: ModelConfig, case: dict, owner_input: str) -> dict:
     return {"record": result.record, "latency": time.perf_counter() - started}
 
 
+def run_baseline_case(case: dict, owner_input: str) -> dict:
+    started = time.perf_counter()
+    record = lexical_triage(owner_input, case["scripted_answers"])
+    latency = time.perf_counter() - started
+    mlflow.log_metric("total_latency_sec", latency)
+    mlflow.log_dict(vars(record), "triage_record.json")
+    return {"record": record, "latency": latency}
+
+
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser()
@@ -60,6 +71,9 @@ def main() -> None:
     parser.add_argument("--model")
     parser.add_argument("--limit", type=int, help="Only run the first N cases.")
     parser.add_argument("--case", help="Only run cases whose id contains this text, e.g. RC01.")
+    parser.add_argument(
+        "--baseline", choices=["lexical"], help="Score a rules-only baseline instead of the LLM."
+    )
     args = parser.parse_args()
 
     config = ModelConfig()
@@ -67,6 +81,10 @@ def main() -> None:
         config.prompt_version = args.prompt_version
     if args.model:
         config.model_name = args.model
+    if args.baseline:
+        # Shows up in the same MLflow columns as the LLM runs, so they sort side by side.
+        config.model_name = f"baseline:{args.baseline}"
+        config.prompt_version = "none"
 
     cases = [c for c in load_golden_cases() if not args.case or args.case in c["case_id"]]
     cases = cases[: args.limit]
@@ -84,8 +102,12 @@ def main() -> None:
                 with tracking.conversation_run(config, run_name=run_name, nested=True):
                     mlflow.set_tag("case_id", case["case_id"])
                     mlflow.set_tag("case_source", case.get("source", "synthetic"))
+                    mlflow.set_tag("wording", i)
                     try:
-                        out = run_case(config, case, owner_input)
+                        if args.baseline:
+                            out = run_baseline_case(case, owner_input)
+                        else:
+                            out = run_case(config, case, owner_input)
                     except Exception as err:  # a failed parse is a result, not a crash
                         mlflow.log_metric("schema_valid", 0)
                         mlflow.set_tag("error", str(err)[:500])
@@ -100,6 +122,10 @@ def main() -> None:
                     mlflow.log_metrics(scores)
                     totals.update(scores)
                     totals["runs"] += 1
+                    # First wordings share phrases with the synonym lists; rewordings
+                    # test whether a result survives paraphrase.
+                    totals[f"code_match_wording{i}"] += scores["code_match"]
+                    totals[f"urgency_match_wording{i}"] += scores["urgency_match"]
                     if case["expected_urgency"] == "EMERGENCY":
                         totals["emergency_runs"] += 1
                         totals["emergencies_caught"] += int(record.urgency_tier == "EMERGENCY")
@@ -143,6 +169,11 @@ def main() -> None:
     print(f"  urgency exact match:    {totals['urgency_match']}/{n}")
     print(f"  photo flag correct:     {totals['photo_match']}/{n}")
     print(f"  schema failures:        {totals['schema_failures']}/{n}")
+    print(
+        f"  by wording (first / reworded): code {totals['code_match_wording0']}"
+        f" / {totals['code_match_wording1']}, urgency {totals['urgency_match_wording0']}"
+        f" / {totals['urgency_match_wording1']}"
+    )
 
 
 if __name__ == "__main__":

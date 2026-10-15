@@ -33,7 +33,7 @@ pip install -r requirements.txt
 |---|---|
 | Web demo | `streamlit run ui.py` |
 | Terminal chat | `python cli.py` |
-| Run the test cases, logged to MLflow | `python evaluate.py` (add `--prompt-version v1` to compare) |
+| Run the test cases, logged to MLflow | `python evaluate.py` (add `--prompt-version v1` to compare, or `--baseline lexical` for rules only) |
 | Tests (no model needed) | `pytest` (add `-m live` to test against the real model) |
 | Lint | `ruff check . && ruff format --check .` |
 | MLflow UI | `mlflow ui --backend-store-uri sqlite:///mlflow.db` |
@@ -56,13 +56,15 @@ GitHub Actions runs the linter, the tests on Python 3.11 and 3.13, and a Docker 
 
 Model `qwen3.8:27b`, run locally at temperature 0. Six synthetic cases, each worded two ways (12 runs). Counts, not percentages, because the set is small.
 
-| | Prompt v1 | Prompt v2 |
-|---|---|---|
-| Emergencies caught | 4 / 4 | 4 / 4 |
-| Rated less urgent than expected | **2 / 12** | 0 / 12 |
-| Rated more urgent than expected | 0 / 12 | 0 / 12 |
-| Complaint code correct | 12 / 12 | 12 / 12 |
-| Photo flag correct | 11 / 12 | 12 / 12 |
+| | Rules only (no LLM) | Prompt v1 | Prompt v2 |
+|---|---|---|---|
+| Emergencies caught | **3 / 4** | 4 / 4 | 4 / 4 |
+| Rated less urgent than expected | **5 / 12** | **2 / 12** | 0 / 12 |
+| Rated more urgent than expected | 1 / 12 | 0 / 12 | 0 / 12 |
+| Complaint code correct | 7 / 12 | 12 / 12 | 12 / 12 |
+| Photo flag correct | 11 / 12 | 11 / 12 | 12 / 12 |
+
+**Rules only** is the baseline: the emergency phrase list alone sets urgency (EMERGENCY or ROUTINE), and the complaint synonym lists pick the code. It missed a blocked cat described as "only a few drops of wee come out", which no emergency phrase covers, and it can't tell a hot spot or cut paw needs seeing within 24 hours. It also flagged "not struggling to breathe" as an emergency. Its codes held up on the first wordings (5 / 6) but not on the rewordings (2 / 6), because those first wordings share phrases with the synonym lists. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
 
 v1 rated a spreading, itchy skin sore as ROUTINE, and asked for a photo of a bloated belly. v2 added plain definitions of each urgency level and "when torn, choose the more urgent level". **v2 was written after seeing these failures, so its perfect score is partly fitted to the test.**
 
