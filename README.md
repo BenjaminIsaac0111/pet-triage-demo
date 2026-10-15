@@ -20,26 +20,15 @@ graph LR
 
 ## Quick start
 
-Needs Python 3.11+ and [Ollama](https://ollama.com) (or an API key; see below).
+Needs Python 3.11+, plus one way to run a model (see [Choosing a model](#choosing-a-model); the default is [Ollama](https://ollama.com)).
 
 ```bash
-ollama pull qwen2.5:7b
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pre-commit install                 # secret scan + lint on commit, tests on push
+ollama pull qwen2.5:7b             # skip if you use your own model or API
 ```
-
-**Your own model or API.** Copy `.env.example` to `.env` and set `TRIAGE_PROVIDER` and `TRIAGE_MODEL`:
-
-| Provider | Set |
-|---|---|
-| Any Ollama model (default) | `TRIAGE_MODEL=<name from ollama list>` |
-| Anthropic | `TRIAGE_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` |
-| OpenAI | `TRIAGE_PROVIDER=openai`, `OPENAI_API_KEY` |
-| Your own server with an OpenAI-compatible API (LM Studio, vLLM) | `TRIAGE_PROVIDER=openai`, `OPENAI_BASE_URL` |
-
-`.env` is git-ignored, and keys are read by each provider's SDK, never logged to MLflow. The provider and model are logged as run params, so runs on different models compare side by side.
 
 | | |
 |---|---|
@@ -50,11 +39,50 @@ pre-commit install                 # secret scan + lint on commit, tests on push
 | Lint | `ruff check . && ruff format --check .` |
 | MLflow UI | `mlflow ui --backend-store-uri sqlite:///mlflow.db` |
 
-Settings (model, prompt version and so on) are optional; see `.env.example`.
+Other settings (prompt version, temperature, timeout) are optional; see `.env.example`.
 
 **With Docker** (app and Ollama together): `docker compose up -d`, then `docker compose exec ollama ollama pull qwen2.5:7b`, and open http://localhost:8501.
 
 **Before code leaves your machine**, `pre-commit` runs [gitleaks](https://github.com/gitleaks/gitleaks) (secret scan) and ruff on every commit, and the unit tests on every push. Run them all by hand with `pre-commit run --all-files --hook-stage pre-push`. GitHub Actions then runs the linter, the tests on Python 3.11 and 3.13, and a Docker build on every push.
+
+## Choosing a model
+
+The app talks to the model through LangChain, so the rest of the code doesn't care which one you use. Copy `.env.example` to `.env` (`cp .env.example .env`, or `copy` on Windows) and pick one:
+
+**1. Ollama, local (default).** No `.env` needed for the default. For another model, use any name from `ollama list`:
+```bash
+TRIAGE_MODEL=qwen2.5:7b            # ~5 GB; qwen2.5:3b is faster but less accurate
+# OLLAMA_BASE_URL=http://other-machine:11434
+```
+
+**2. Your own local server with an OpenAI-compatible API** (LM Studio, vLLM, llama.cpp server):
+```bash
+TRIAGE_PROVIDER=openai
+TRIAGE_MODEL=<model name as the server lists it>
+OPENAI_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=not-needed
+```
+
+**3. Anthropic API:**
+```bash
+TRIAGE_PROVIDER=anthropic
+TRIAGE_MODEL=claude-sonnet-5-5
+ANTHROPIC_API_KEY=<your key>
+```
+
+**4. OpenAI API:**
+```bash
+TRIAGE_PROVIDER=openai
+TRIAGE_MODEL=<model name>
+OPENAI_API_KEY=<your key>
+```
+
+Notes:
+- **Keys stay local.** `.env` is git-ignored, and if a key is ever staged anyway, the gitleaks hook blocks the commit. Keys are read by each provider's SDK and never logged to MLflow.
+- **Every run records what ran.** Provider, model name and, for Ollama, the exact weights digest are logged as MLflow params, so runs on different models compare side by side.
+- **Results depend on the model.** The numbers in [Results](#results) are for one model; rerun `python evaluate.py` on yours.
+- **API cost.** A conversation is 2 calls, plus up to 4 more when a red flag is about to be dismissed. A full `evaluate.py` run is a few dozen calls.
+- **Docker** runs the Ollama option only; for an API, run the app locally.
 
 ## How it works
 
