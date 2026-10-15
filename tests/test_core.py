@@ -113,6 +113,18 @@ def test_flag_lifted_when_all_samples_agree(make_session):
     assert result.questions  # flag dismissed, normal flow continues
     assert fakes.calls == ["triage"] * 4 + ["questions"]
     assert result.metrics["early_lift_check_min_agreement"] == 1.0
+    assert result.metrics["early_lift_check_failures"] == 0
+
+
+def test_broken_sample_keeps_flag_and_is_counted(make_session):
+    broken = assessment(checks=DENIED, code="NOT-A-CODE")  # fails schema validation
+    later = [assessment(checks=DENIED, code="DEMO-012"), broken, broken]
+    session, _ = make_session(
+        assessment(checks=DENIED, code="DEMO-012"), later, lift_check_samples=3
+    )
+    result = session.start("He's not struggling to breathe, just sneezing")
+    assert result.record.urgency_tier == "EMERGENCY"
+    assert result.metrics["lift_check_failures"] == 2
 
 
 def test_flag_kept_when_one_sample_disagrees(make_session):

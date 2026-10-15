@@ -32,13 +32,21 @@ class ModelConfig:
     lift_check_temperature: float = field(
         default_factory=lambda: float(os.getenv("TRIAGE_LIFT_CHECK_TEMPERATURE", "0.8"))
     )
+    # Per LLM call. Without it a hung model blocks the conversation forever.
+    timeout_sec: float = field(
+        default_factory=lambda: float(os.getenv("TRIAGE_TIMEOUT_SEC", "120"))
+    )
 
 
 def build_llm(config: ModelConfig) -> BaseChatModel:
     """Local model via Ollama. Swap this function to use a hosted provider."""
     from langchain_ollama import ChatOllama
 
-    kwargs = {"model": config.model_name, "temperature": config.temperature}
+    kwargs = {
+        "model": config.model_name,
+        "temperature": config.temperature,
+        "client_kwargs": {"timeout": config.timeout_sec},
+    }
     if config.base_url:
         kwargs["base_url"] = config.base_url
     return ChatOllama(**kwargs)

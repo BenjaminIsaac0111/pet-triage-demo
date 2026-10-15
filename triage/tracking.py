@@ -12,6 +12,7 @@ free text that may contain personal details.
 
 import os
 from contextlib import contextmanager
+from functools import lru_cache
 
 import mlflow
 
@@ -26,13 +27,32 @@ def setup(experiment: str) -> None:
     mlflow.langchain.autolog()
 
 
+@lru_cache
+def model_digest(model_name: str, base_url: str | None = None) -> str:
+    """Ollama's id for the exact weights behind a name like "qwen2.5:7b".
+
+    The name can point to different weights after a re-pull, so the digest is
+    what makes a run reproducible. "unknown" if Ollama can't be asked.
+    """
+    import ollama
+
+    wanted = model_name if ":" in model_name else f"{model_name}:latest"
+    try:
+        models = ollama.Client(host=base_url, timeout=5).list().models
+    except Exception:
+        return "unknown"
+    return next((m.digest[:12] for m in models if m.model == wanted and m.digest), "unknown")
+
+
 def config_params(config: ModelConfig) -> dict[str, str | float]:
     return {
         "model_name": config.model_name,
+        "model_digest": model_digest(config.model_name, config.base_url),
         "temperature": config.temperature,
         "prompt_version": config.prompt_version,
         "lift_check_samples": config.lift_check_samples,
         "lift_check_temperature": config.lift_check_temperature,
+        "timeout_sec": config.timeout_sec,
     }
 
 

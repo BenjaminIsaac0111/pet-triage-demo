@@ -150,17 +150,22 @@ class TriageSession:
         """
         chain, _schema = build_triage_chain(self.sampling_llm, self.config.prompt_version, detected)
         samples = []
+        failures = 0
         t0 = time.perf_counter()
         for _ in range(self.config.lift_check_samples):
             try:
                 parsed, _retries = invoke_with_retry(chain, self.history, max_retries=0)
                 samples.append(parsed.red_flag_checks)
             except Exception:
-                samples.append([])  # a broken reply counts as disagreeing
+                # A broken reply or timeout counts as disagreeing, so the flag is kept.
+                # Counted, because otherwise a broken model looks like an unsure one.
+                samples.append([])
+                failures += 1
         agreement = red_flags.lift_agreement(lifted, samples)
         metrics = {
             "lift_check_latency_sec": time.perf_counter() - t0,
             "lift_check_min_agreement": min(agreement.values()),
             "flags_kept_after_lift_check": sum(share < 1.0 for share in agreement.values()),
+            "lift_check_failures": failures,
         }
         return agreement, metrics
