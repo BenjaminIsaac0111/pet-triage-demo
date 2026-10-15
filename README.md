@@ -41,6 +41,8 @@ ollama pull qwen2.5:7b             # skip if you use your own model or API
 
 Other settings (prompt version, temperature, timeout) are optional; see `.env.example`.
 
+The web demo and terminal chat are thin front ends over the same conversation code (`triage/core.py`) that the tests and evaluation use. The tests cover the parts that matter most without needing a model: the safety floor, the output schema, the conversation flow, scoring and retries. Coverage isn't a target.
+
 **With Docker** (app and Ollama together): `docker compose up -d`, then `docker compose exec ollama ollama pull qwen2.5:7b`, and open http://localhost:8501.
 
 **Before code leaves your machine**, `pre-commit` runs [gitleaks](https://github.com/gitleaks/gitleaks) (secret scan) and ruff on every commit, and the unit tests on every push. Run them all by hand with `pre-commit run --all-files --hook-stage pre-push`. GitHub Actions then runs the linter, the tests on Python 3.11 and 3.13, and a Docker build on every push.
