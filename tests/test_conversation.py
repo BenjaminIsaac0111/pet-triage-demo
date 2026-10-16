@@ -153,7 +153,7 @@ def test_no_recheck_when_no_flag_is_being_lifted(make_conversation):
     assert chains.calls == ["assessment"]
 
 
-# --- Scope: what the service declines to triage (docs/adr/0006) ---
+# --- Scope: what the service declines to triage ---
 
 
 def test_other_species_ends_before_questions(make_conversation):

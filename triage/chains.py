@@ -22,7 +22,7 @@ from triage.schemas import FollowUpQuestions, ScopedFollowUpQuestions, build_ass
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# Prompts written before the scope check (docs/adr/0006). They run with the
+# Prompts written before the scope check (species and health concern). They run with the
 # reply formats they were written for: adding fields their wording doesn't
 # explain made a 7B model refuse real cases as "not a health problem".
 PROMPTS_WITHOUT_SCOPE_CHECK = {"v1", "v2"}

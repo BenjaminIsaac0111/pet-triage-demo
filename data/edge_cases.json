@@ -1,5 +1,5 @@
 {
-  "_note": "Edge cases for scope and unlisted complaints, scored apart from evaluation_cases.json: those measure triage accuracy, these check that the system declines, escalates or falls back correctly. EC01 is a real exploratory test from the web demo, kept as found. Expected outcomes are product decisions (cats and dogs only), not clinical labels. See docs/adr/0006-out-of-scope-and-unlisted-complaints.md.",
+  "_note": "Edge cases for scope and unlisted complaints, scored apart from evaluation_cases.json: those measure triage accuracy, these check that the system declines, escalates or falls back correctly. EC01 is a real exploratory test from the web demo, kept as found. Expected outcomes are product decisions (cats and dogs only), not clinical labels.",
   "cases": [
     {
       "case_id": "EC01_raccoon_food_thief",
@@ -52,6 +52,15 @@
       "expected_outcome": "triaged",
       "acceptable_codes": ["DEMO-010"],
       "why": "Species not stated at first: ask, don't refuse."
+    },
+    {
+      "case_id": "EC08_cat_named_lily",
+      "source": "manual test in the web demo",
+      "owner_message": "My cat Lily has been sneezing a bit since yesterday but she's eating and playing as normal.",
+      "scripted_answers": "No discharge from her eyes or nose. She's 4 and up to date with her vaccinations.",
+      "expected_outcome": "triaged",
+      "acceptable_codes": ["DEMO-012"],
+      "why": "A pet's name isn't a red flag. 'lily' used to be a poisoning phrase on its own, and this mild case came back as EMERGENCY."
     }
   ]
 }

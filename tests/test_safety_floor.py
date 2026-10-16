@@ -26,6 +26,15 @@ class TestFindRedFlags:
         # Matching words can't see "not"; reading context is the model's job.
         assert find_red_flags("He's not struggling to breathe") == ["breathing"]
 
+    def test_pet_named_lily_is_not_a_poisoning(self):
+        # Found in the web demo: "my cat Lily ... sneezing" was triaged as EMERGENCY.
+        assert find_red_flags("My cat Lily has been sneezing since yesterday") == []
+
+    def test_lily_plant_is_still_a_poisoning(self):
+        assert find_red_flags("Lily chewed a lily from the vase") == ["poisoning"]
+        assert find_red_flags("There's lily pollen on her face") == ["poisoning"]
+        assert find_red_flags("She was sniffing the lilies") == ["poisoning"]
+
 
 class TestQuoteAppearsIn:
     def test_exact_quote(self):
@@ -41,6 +50,19 @@ class TestQuoteAppearsIn:
 
     def test_single_word_rejected(self):
         assert not quote_appears_in("no", "no breathing problems")
+
+    def test_negation_moved_onto_the_sign_rejected(self):
+        # Every word is in the owner's text, but the owner said the opposite.
+        owner = "He is struggling to breathe and not eating since this morning."
+        assert not quote_appears_in("he is not struggling to breathe", owner)
+
+    def test_negation_spelled_differently_accepted(self):
+        owner = "She isn't struggling to breathe at all, she's just sneezing"
+        assert quote_appears_in("not struggling to breathe at all", owner)
+
+    def test_negation_at_end_of_quote_checked_against_word_before(self):
+        assert quote_appears_in("breathing problems none", "breathing problems none at all")
+        assert not quote_appears_in("breathing problems none", "none, breathing problems")
 
 
 class TestApplySafetyFloor:
@@ -78,6 +100,13 @@ class TestApplySafetyFloor:
         checks = [check("breathing", "absent", "breathing is totally normal")]
         result = apply_safety_floor("ROUTINE", ["breathing"], checks, self.OWNER)
         assert result.urgency_tier == "EMERGENCY"
+
+    def test_absent_with_reordered_negation_does_not_lift(self):
+        owner = "He is struggling to breathe and not eating."
+        checks = [check("breathing", "absent", "he is not struggling to breathe")]
+        result = apply_safety_floor("ROUTINE", ["breathing"], checks, owner)
+        assert result.urgency_tier == "EMERGENCY"
+        assert result.flags_lifted == []
 
     def test_never_lowers_model_urgency(self):
         checks = [check("breathing", "absent", "not struggling to breathe")]

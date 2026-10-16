@@ -10,10 +10,29 @@ Results are kept as raw counts, not percentages: with a dozen runs, a
 percentage would suggest more certainty than we have.
 """
 
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 
 from triage.schemas import URGENCY_RANK
+
+
+def speed_and_token_summary(result_rows: list[dict]) -> dict[str, float]:
+    """Per-conversation speed and size, for comparing models on the parent run.
+
+    The 90th percentile shows the slow end that an owner waiting in a chat
+    actually feels; the mean alone hides it.
+    """
+    latencies = sorted(row["latency_sec"] for row in result_rows if "latency_sec" in row)
+    summary: dict[str, float] = {}
+    if latencies:
+        summary["mean_latency_sec"] = statistics.fmean(latencies)
+        summary["p90_latency_sec"] = latencies[min(len(latencies) - 1, int(0.9 * len(latencies)))]
+    for name in ("input_tokens", "output_tokens"):
+        values = [row[name] for row in result_rows if row.get(name)]
+        if values:
+            summary[f"mean_{name}_per_conversation"] = statistics.fmean(values)
+    return summary
 
 
 def score_record(case: dict, record) -> dict[str, int]:

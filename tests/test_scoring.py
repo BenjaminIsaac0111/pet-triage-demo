@@ -2,7 +2,24 @@
 
 from types import SimpleNamespace
 
-from triage.scoring import EvaluationTally, score_edge_case, score_record, turn_outcome
+from triage.scoring import (
+    EvaluationTally,
+    score_edge_case,
+    score_record,
+    speed_and_token_summary,
+    turn_outcome,
+)
+
+
+def test_speed_and_token_summary():
+    rows = [{"latency_sec": s, "input_tokens": 100, "output_tokens": 10} for s in range(1, 11)] + [
+        {"error": "failed"}
+    ]  # failed runs have no timings and are left out
+    summary = speed_and_token_summary(rows)
+    assert summary["mean_latency_sec"] == 5.5
+    assert summary["p90_latency_sec"] == 10
+    assert summary["mean_input_tokens_per_conversation"] == 100
+
 
 BLOAT_CASE = {
     "acceptable_codes": ["DEMO-002", "DEMO-011"],

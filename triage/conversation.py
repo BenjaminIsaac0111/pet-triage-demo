@@ -10,8 +10,10 @@ Turn 2, `answer`: the owner answers, and the model fills the triage record.
 
 Either turn can instead end the conversation as out of scope: an animal the
 service doesn't cover, or something that isn't a health problem. A confirmed
-emergency is never turned away for being out of scope (see
-docs/adr/0006-out-of-scope-and-unlisted-complaints.md).
+emergency is never turned away for being out of scope. Only an emergency
+phrase sends a message straight to the assessment, so an emergency the
+keyword check misses can still be declined at the questions step (with
+advice to contact a vet).
 
 Each turn returns a `TurnResult` whose `metrics` (timings, retries, safety
 checks) the callers log to MLflow: web_demo.py, terminal_chat.py, evaluate.py.

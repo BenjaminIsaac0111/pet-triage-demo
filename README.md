@@ -6,7 +6,7 @@ Built with LangChain, a local model through Ollama (or your own model or API key
 
 **Prototype only.** The test cases are mostly synthetic and labelled by a non-vet. This shows the approach, not clinical safety.
 
-The service covers **cats and dogs only**, as an example scope. Anything else, or anything that isn't a health problem, is politely declined, except a likely emergency, which always gets "contact a vet now". Design decisions and their trade-offs are in [docs/adr](docs/adr/README.md).
+The service covers **cats and dogs only**, as an example scope. Anything else, or anything that isn't a health problem, is politely declined, except an emergency the keyword check catches, which always gets "contact a vet now".
 
 ```mermaid
 graph LR
@@ -26,9 +26,9 @@ graph LR
 
 1. **Keyword check.** The owner's words are scanned for emergency phrases ("nothing comes up", "struggling to breathe"). It's free and predictable, but it can't read context like "*not* struggling to breathe".
 2. **Questions.** With no emergency phrase, the LLM asks 2–3 follow-up questions. With one, it skips straight to the assessment.
-3. **Scope.** Before writing anything else, both LLM calls say which animal this is and whether it's a health problem. Code, not the model, applies the rule: anything that isn't a cat or dog health problem is politely declined, with no record and no appointment advice. A likely emergency is never declined. This was added after an exploratory test ("my racoon keeps stealing my food") was coded as "Lump or swelling".
+3. **Scope.** Before writing anything else, both LLM calls say which animal this is and whether it's a health problem. Code, not the model, applies the rule: anything that isn't a cat or dog health problem is politely declined, with no record and no appointment advice. An emergency the keyword check catches is never declined; one it misses can be, though the reply still tells the owner to contact a vet if they're worried. This was added after an exploratory test ("my racoon keeps stealing my food") was coded as "Lump or swelling".
 4. **Assessment.** The LLM fills a fixed form: summary, complaint code, photo flag, urgency. Codes can only come from our list, enforced while the model writes; a problem that isn't on the list is coded "Other / not listed" rather than forced into the nearest wrong code. For each emergency phrase found, the model also says whether the sign is present, absent or unclear, quoting the owner. That gives the keyword check its context, in the same call.
-5. **Safety floor.** Any emergency phrase forces EMERGENCY, unless the model says the sign is absent, its quote really appears in the owner's words, *and* it gives the same answer when asked 4 more times. The rule can only raise urgency, never lower it.
+5. **Safety floor.** Any emergency phrase forces EMERGENCY, unless the model says the sign is absent, its quote really appears in the owner's words (with any "not" next to the same word the owner put it next to), *and* it gives the same answer when asked 4 more times. The rule can only raise urgency, never lower it.
 6. **Tracking.** Each conversation is one MLflow run: settings as parameters; latency, retries and safety checks as metrics; the record as a JSON file. LangChain autologging captures every prompt and response as a trace.
 
 ## Where the code lives
@@ -44,31 +44,33 @@ graph LR
 | `evaluate.py` + `triage/scoring.py` | Runs the test cases and scores them |
 | `web_demo.py`, `terminal_chat.py` | Thin front ends over the same conversation code |
 | `prompts/v1` … `v3` | Prompt wording, kept out of the code so versions can be compared (v3, the default, adds the scope check) |
-| `docs/adr/` | Design decisions: what was decided, the alternatives, and the trade-offs |
 | `data/` | Complaint codes, emergency phrases, test cases and edge cases |
 
 `triage/__init__.py` lists the smaller supporting modules. Planned improvements are marked `TODO` in the code, next to where they'd go.
 
 ## Results
 
-Model `qwen2.5:7b-instruct` (Ollama weights `845dbda0ea48`), run locally at temperature 0, so anyone with Ollama can reproduce it. Six synthetic cases, each worded two ways (12 runs). Counts, not percentages, because the set is small: a difference of one or two runs is noise.
+Model `qwen2.5:7b` (Ollama weights `845dbda0ea48`, 7.6B, Q4_K_M), run locally at temperature 0 on an RTX 3090, about 1.5 s per conversation. Six synthetic cases and one real case, each worded two ways (14 runs): exactly what `python evaluate.py` runs. Counts, not percentages, because the set is small: a difference of one or two runs is noise. In MLflow these are the parent runs tagged `study = "readme-results"`.
 
 | | Rules only (no LLM) | Prompt v1 | Prompt v2 | Prompt v3 (default) |
 |---|---|---|---|---|
-| Emergencies caught | **3 / 4** | **3 / 4** | 4 / 4 | **3 / 4** |
-| Rated less urgent than expected | **5 / 12** | 1 / 12 | 0 / 12 | 1 / 12 |
-| Rated more urgent than expected | 1 / 12 | 1 / 12 | 1 / 12 | 2 / 12 |
-| Complaint code correct | 7 / 12 | 11 / 12 | 11 / 12 | 10 / 12 |
-| Photo flag correct | 11 / 12 | 10 / 12 | 10 / 12 | 10 / 12 |
-| Real cases wrongly declined as out of scope | 0 / 12 (can't decline) | 0 / 12 (can't decline) | 0 / 12 (can't decline) | 0 / 12 |
+| Emergencies caught | 3 / 4 | 3 / 4 | 3 / 4 | 3 / 4 |
+| … by the model alone, before the safety floor | n/a | 1 / 4 | 2 / 4 | 3 / 4 |
+| Rated less urgent than expected | **7 / 14** | 1 / 14 | 1 / 14 | 1 / 14 |
+| Rated more urgent than expected | 1 / 14 | 1 / 14 | 1 / 14 | 2 / 14 |
+| Complaint code correct | 9 / 14 | 12 / 14 | 12 / 14 | 13 / 14 |
+| Photo flag correct | 13 / 14 | 12 / 14 | 12 / 14 | 12 / 14 |
+| Real cases wrongly declined as out of scope | 0 / 14 (can't decline) | 0 / 14 (can't decline) | 0 / 14 (can't decline) | 0 / 14 |
 | Out-of-scope requests declined (edge cases) | 0 / 3 | 0 / 3 | 0 / 3 | 3 / 3 |
-| All edge cases handled correctly (`--edge-cases`) | 4 / 7 | 4 / 7 | 4 / 7 | 7 / 7 |
+| Edge cases ending as expected (`--edge-cases`) | 5 / 8 | 5 / 8 | 5 / 8 | 7 / 8 |
 
-- **Rules only** uses just the phrase lists. It couldn't grade the middle tier and flagged "*not* struggling to breathe" as an emergency. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
-- **The missed emergency is the same case almost every time:** a blocked cat described as "only a few drops of wee come out". No emergency phrase covers that wording, so it depends on the model alone, and only v2 caught it (once). It's a gap in the phrase list, not in any one prompt.
-- **The over-triage is mostly deliberate.** "He's *not* struggling to breathe" is kept as an emergency when the re-check samples disagree: the safety floor prefers a false alarm to a missed emergency.
-- **v1 → v2.** v2 added plain definitions of each urgency level and "when torn, choose the more urgent level", after v1 under-triaged a spreading skin sore in an earlier run on a larger model (`qwen3.8:27b`). v2 was written after seeing that failure, so its score is partly fitted to the test.
-- **v2 → v3.** v3 adds the scope check (cats and dogs, health problems only) and the "Other / not listed" code. Without it, every earlier version triages whatever it's given: v2 still codes the raccoon as "Lump or swelling", exactly as in the original exploratory test, and all three earlier systems book appointments for the raccoon, a hamster and a lead-training question. v3 declines those three, still escalates a rabbit that can't breathe, and declines none of the real cases. On the main cases it's one run behind v2 on most rows, which is within noise at this size; v2 is the only version that caught every emergency. One edge case no version gets right: a dog's smelly ear is coded "Eye discharge" instead of "Other", so the scope fix doesn't cure the pull towards the nearest wrong code.
+- **Rules only** uses just the phrase lists. It couldn't grade the middle tier (half its runs were rated less urgent than expected) and flagged "*not* struggling to breathe" as an emergency. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
+- **The missed emergency is the same case in every version:** a blocked cat described as "only a few drops of wee come out". No emergency phrase covers that wording, so it depends on the model alone, and no version caught it in this run (v2 caught it once in an earlier one). It's a gap in the phrase list, not in any one prompt.
+- **The safety floor earns its place.** With v1 the model alone rated only 1 of the 4 emergency runs as EMERGENCY; the keyword floor raised two more. The 7B model often leaves the red-flag checklist empty (11 of the 15 conversations with an emergency phrase), and a flag the model doesn't answer about is kept.
+- **The over-triage is mostly deliberate.** "He's *not* struggling to breathe" ends as EMERGENCY in every version, because the model skipped the flag check and the floor keeps an unanswered flag: it prefers a false alarm to a missed emergency. v3's second over-triage is a morning-bile case rated URGENT_24H.
+- **v1 → v2.** v2 added plain definitions of each urgency level and "when torn, choose the more urgent level", after v1 under-triaged a spreading skin sore in an earlier run on a larger model (`qwen3.8:27b`). v2 was written after seeing that failure, so its score is partly fitted to the test. On this run v1 and v2 tie on every final-result row; the difference shows only in what the model catches before the floor.
+- **v2 → v3.** v3 adds the scope check (cats and dogs, health problems only) and the "Other / not listed" code. Without it, every earlier version triages whatever it's given: v2 still codes the raccoon as "Lump or swelling", exactly as in the original exploratory test, and all three earlier systems book appointments for the raccoon, a hamster and a lead-training question. v3 declines those three, still escalates a rabbit that can't breathe, and declines none of the main cases. It did decline one edge case it should have triaged: a dog that suddenly started eating stones, judged "not a health problem". That case passed in an earlier run, so the line between behaviour and health is fuzzy for a 7B model. One edge case no version gets right: a dog's smelly ear gets a wrong code ("Eye discharge", or "Sneezing" with v3) instead of "Other", so the scope fix doesn't cure the pull towards the nearest wrong code.
+- **A pet's name isn't a red flag.** A manual test found that "my cat Lily has been sneezing" was escalated to EMERGENCY, because "lily" was a poisoning phrase on its own. It now needs context ("a lily", "lily pollen"), and edge case EC08 checks it. The same review tightened the quote check so a "not" must sit where the owner put it. Neither change moved the numbers above: the model filled in only 4 flag checks across these runs, all "present".
 - **Versions are compared as written.** v1 and v2 run with the reply formats they were written for. Adding v3's scope fields to them made the 7B model decline real cases (vomiting, a hot spot) as "not a health problem", because their wording doesn't explain the fields: prompt and reply format are versioned together.
 - **One real case.** My cat developed a painful lump after being neutered. I wrote the message before running anything and labelled it with what the vet nurse decided at the time (an appointment the next day). Both wordings matched with every prompt version, and no prompt was tuned on it. It also exposed a gap in the complaint list, so I added a "lump or swelling" code.
 
@@ -89,6 +91,7 @@ ollama pull qwen2.5:7b             # skip if you use your own model or API
 | Web demo | `streamlit run web_demo.py` |
 | Terminal chat | `python terminal_chat.py` |
 | Test cases, logged to MLflow | `python evaluate.py` (`--prompt-version v1` to compare, `--baseline lexical` for rules only, `--edge-cases` for scope checks) |
+| Compare local models (same cases, one MLflow study tag) | `python run_model_comparison.py --models qwen2.5:7b qwen3:8b` |
 | Unit tests (no model needed) | `pytest` (`-m live` to also test against the real model) |
 | MLflow UI | `mlflow ui --backend-store-uri sqlite:///mlflow.db` |
 

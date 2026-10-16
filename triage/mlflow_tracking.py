@@ -16,23 +16,117 @@ for text that may contain personal details.
 """
 
 import os
+import subprocess
 from contextlib import contextmanager
 from functools import lru_cache
 
 import mlflow
+from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import BaseMessage
 
+from triage.outcome_matrix import OutcomeMatrix
 from triage.schemas import TriageRecord
 from triage.settings import TriageSettings
 
 DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"  # MLflow's file store is in maintenance mode
 
+# Shown as each experiment's description in the MLflow UI.
+EXPERIMENT_DESCRIPTIONS = {
+    "pet-triage-eval": (
+        "Main evaluation cases (data/evaluation_cases.json), each worded two ways. Scored "
+        "against the expected urgency, complaint code and photo flag. One parent run per "
+        "model and prompt version, with a child run per wording. Filter parent runs by the "
+        "`study` tag; compare them to see whether a change helped."
+    ),
+    "pet-triage-edge-cases": (
+        "Scope and unlisted-complaint checks (data/edge_cases.json): other species, "
+        "non-health questions, and problems with no matching code. Scored on how each "
+        "conversation ended."
+    ),
+    "pet-triage-ui": "Conversations from the web demo (web_demo.py). One run per conversation.",
+    "pet-triage-cli": "Conversations from the terminal chat. One run per conversation.",
+}
+
 
 def start_tracking(experiment_name: str) -> None:
-    """Point MLflow at the tracking database and turn on LangChain tracing."""
+    """Point MLflow at the tracking database, describe the experiment, and turn on tracing."""
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI))
-    mlflow.set_experiment(experiment_name)
+    experiment = mlflow.set_experiment(experiment_name)
+    if experiment_name in EXPERIMENT_DESCRIPTIONS:
+        mlflow.MlflowClient().set_experiment_tag(
+            experiment.experiment_id,
+            "mlflow.note.content",  # the field the MLflow UI shows as the description
+            EXPERIMENT_DESCRIPTIONS[experiment_name],
+        )
     mlflow.langchain.autolog()
+
+
+@lru_cache
+def ollama_model_details(model_name: str, ollama_base_url: str | None = None) -> dict[str, str]:
+    """Family, parameter count and quantisation of an Ollama model, for run tags.
+
+    These make runs filterable by model size in the MLflow UI. Values are
+    "unknown" if Ollama can't be reached.
+    """
+    import ollama
+
+    unknown = {"model_family": "unknown", "model_parameter_size": "unknown"}
+    unknown["model_quantization"] = "unknown"
+    try:
+        details = ollama.Client(host=ollama_base_url, timeout=5).show(model_name).details
+    except Exception:
+        return unknown
+    return {
+        "model_family": details.family or "unknown",
+        "model_parameter_size": details.parameter_size or "unknown",  # e.g. "8.2B"
+        "model_quantization": details.quantization_level or "unknown",  # e.g. "Q4_K_M"
+    }
+
+
+@lru_cache
+def hardware_label() -> str:
+    """The GPU name, so latency is only compared between runs on the same hardware."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip().splitlines()[0] or "unknown"
+    except Exception:
+        return "no NVIDIA GPU found"
+
+
+def describe_run(description: str, tags: dict[str, str]) -> None:
+    """Give the active run a description (shown in the MLflow UI) and filterable tags."""
+    mlflow.set_tags({"mlflow.note.content": description, **tags})
+
+
+@contextmanager
+def count_tokens():
+    """Count the tokens used by every model call inside the `with` block.
+
+    Yields a dict that holds the totals once the block ends:
+    input_tokens (what was sent) and output_tokens (what the model wrote,
+    including any hidden "thinking" tokens).
+    """
+    totals = {"input_tokens": 0, "output_tokens": 0}
+    with get_usage_metadata_callback() as usage:
+        yield totals
+    for per_model in usage.usage_metadata.values():
+        totals["input_tokens"] += per_model.get("input_tokens", 0)
+        totals["output_tokens"] += per_model.get("output_tokens", 0)
+
+
+def log_outcome_matrix(matrix: OutcomeMatrix, title: str) -> None:
+    """Log the outcome matrix to the active run as a table and a colour-coded image."""
+    import matplotlib.pyplot as plt
+
+    mlflow.log_table(matrix.as_table(), "outcome_matrix.json")
+    figure = matrix.figure(title)
+    mlflow.log_figure(figure, "outcome_matrix.png")
+    plt.close(figure)
 
 
 @lru_cache

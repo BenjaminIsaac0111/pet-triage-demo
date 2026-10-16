@@ -29,8 +29,7 @@ FlagStatus = Literal["present", "absent", "unclear"]
 
 
 # Which animals the service covers. A product decision, not a model one: the
-# service this demo is modelled on focuses on cats and dogs. See
-# docs/adr/0006-out-of-scope-and-unlisted-complaints.md.
+# service this demo is modelled on focuses on cats and dogs.
 Species = Literal["dog", "cat", "other", "not stated"]
 SUPPORTED_SPECIES = ("dog", "cat", "not stated")  # "not stated": ask, don't refuse
 

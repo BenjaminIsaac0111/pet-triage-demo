@@ -29,7 +29,7 @@ class TriageSettings:
     temperature: float = field(default_factory=lambda: float(_from_env("TRIAGE_TEMPERATURE", "0")))
 
     # Which folder under prompts/ to use. v2 fixed v1's failures (see the README);
-    # v3 adds the scope check and the "Other" code (docs/adr/0006).
+    # v3 adds the scope check and the "Other" code.
     prompt_version: str = field(default_factory=lambda: _from_env("TRIAGE_PROMPT_VERSION", "v3"))
 
     # Only for Ollama on another machine. OpenAI-compatible servers use

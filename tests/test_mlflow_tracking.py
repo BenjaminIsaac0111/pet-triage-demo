@@ -40,6 +40,33 @@ def test_hosted_models_have_no_digest():
     assert params["provider"] == "anthropic" and params["model_digest"] == "n/a"
 
 
+def test_count_tokens_adds_up_every_model_call():
+    from langchain_core.language_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+
+    def reply(n):
+        usage = {"input_tokens": 10 * n, "output_tokens": n, "total_tokens": 11 * n}
+        # The callback groups usage by model name, which real providers always report.
+        return AIMessage(
+            content="ok", usage_metadata=usage, response_metadata={"model_name": "stand-in"}
+        )
+
+    model = GenericFakeChatModel(messages=iter([reply(1), reply(2)]))
+    with mlflow_tracking.count_tokens() as tokens:
+        model.invoke("first")
+        model.invoke("second")
+    assert tokens == {"input_tokens": 30, "output_tokens": 3}
+
+
+def test_experiment_gets_its_description(tmp_path, monkeypatch):
+    import mlflow
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    mlflow_tracking.start_tracking("pet-triage-eval")
+    experiment = mlflow.get_experiment_by_name("pet-triage-eval")
+    assert experiment.tags["mlflow.note.content"].startswith("Main evaluation cases")
+
+
 def test_param_names_stay_stable():
     # Renaming a parameter would break comparisons with older MLflow runs.
     params = mlflow_tracking.run_params(TriageSettings(provider="anthropic", model_name="m"))
