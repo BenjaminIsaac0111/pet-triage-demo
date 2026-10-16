@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import time
+from types import SimpleNamespace
 
 import mlflow
 from dotenv import load_dotenv
@@ -45,10 +46,7 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Run data/edge_cases.json (scope, unlisted complaints) instead of the main cases.",
     )
-    args = parser.parse_args()
-    if args.edge_cases and args.baseline:
-        parser.error("--edge-cases needs a model; the rules-only baseline has no scope check")
-    return args
+    return parser.parse_args()
 
 
 def settings_from_arguments(args: argparse.Namespace) -> TriageSettings:
@@ -167,8 +165,20 @@ def print_result_line(run_name: str, case: dict, record, scores: dict, seconds: 
     )
 
 
-def run_edge_cases(settings: TriageSettings, case_filter: str | None) -> None:
-    """Run data/edge_cases.json: one wording each, scored on outcome (and code where given)."""
+def run_edge_case_with_rules_only(case: dict) -> tuple[SimpleNamespace, float]:
+    """The rules-only baseline as a turn. It has no scope check, so it never declines."""
+    record, seconds = run_with_rules_only(case, case["owner_message"])
+    return SimpleNamespace(out_of_scope_reason=None, record=record), seconds
+
+
+def run_edge_cases(
+    settings: TriageSettings, case_filter: str | None, use_baseline: bool = False
+) -> None:
+    """Run data/edge_cases.json: one wording each, scored on outcome (and code where given).
+
+    Older prompts (v1, v2) and the rules-only baseline have no scope check, so
+    they never decline: their scores show what the scope check adds.
+    """
     cases = [c for c in load_edge_cases() if not case_filter or case_filter in c["case_id"]]
     mlflow_tracking.start_tracking("pet-triage-edge-cases")
     totals = {"runs": 0, "outcome_match": 0, "code_cases": 0, "code_match": 0}
@@ -178,7 +188,10 @@ def run_edge_cases(settings: TriageSettings, case_filter: str | None) -> None:
         for case in cases:
             with mlflow_tracking.tracked_run(settings, run_name=case["case_id"], nested=True):
                 mlflow.set_tags({"case_id": case["case_id"], "expected": case["expected_outcome"]})
-                turn, seconds = run_with_model(settings, case, case["owner_message"])
+                if use_baseline:
+                    turn, seconds = run_edge_case_with_rules_only(case)
+                else:
+                    turn, seconds = run_with_model(settings, case, case["owner_message"])
                 scores = score_edge_case(case, turn)
                 mlflow.log_metrics({"total_latency_sec": seconds, **scores})
                 totals["runs"] += 1
@@ -204,7 +217,7 @@ def main() -> None:
     args = parse_arguments()
     settings = settings_from_arguments(args)
     if args.edge_cases:
-        run_edge_cases(settings, args.case)
+        run_edge_cases(settings, args.case, use_baseline=bool(args.baseline))
         return
     cases = select_cases(args)
 

@@ -60,14 +60,15 @@ Model `qwen2.5:7b-instruct` (Ollama weights `845dbda0ea48`), run locally at temp
 | Rated more urgent than expected | 1 / 12 | 1 / 12 | 1 / 12 | 2 / 12 |
 | Complaint code correct | 7 / 12 | 11 / 12 | 11 / 12 | 10 / 12 |
 | Photo flag correct | 11 / 12 | 10 / 12 | 10 / 12 | 10 / 12 |
-| Real cases wrongly declined as out of scope | n/a | n/a | n/a | 0 / 12 |
-| Edge cases handled (`--edge-cases`) | n/a | n/a | n/a | 7 / 7 |
+| Real cases wrongly declined as out of scope | 0 / 12 (can't decline) | 0 / 12 (can't decline) | 0 / 12 (can't decline) | 0 / 12 |
+| Out-of-scope requests declined (edge cases) | 0 / 3 | 0 / 3 | 0 / 3 | 3 / 3 |
+| All edge cases handled correctly (`--edge-cases`) | 4 / 7 | 4 / 7 | 4 / 7 | 7 / 7 |
 
 - **Rules only** uses just the phrase lists. It couldn't grade the middle tier and flagged "*not* struggling to breathe" as an emergency. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
 - **The missed emergency is the same case almost every time:** a blocked cat described as "only a few drops of wee come out". No emergency phrase covers that wording, so it depends on the model alone, and only v2 caught it (once). It's a gap in the phrase list, not in any one prompt.
 - **The over-triage is mostly deliberate.** "He's *not* struggling to breathe" is kept as an emergency when the re-check samples disagree: the safety floor prefers a false alarm to a missed emergency.
 - **v1 → v2.** v2 added plain definitions of each urgency level and "when torn, choose the more urgent level", after v1 under-triaged a spreading skin sore in an earlier run on a larger model (`qwen3.8:27b`). v2 was written after seeing that failure, so its score is partly fitted to the test.
-- **v2 → v3.** v3 adds the scope check (cats and dogs, health problems only) and the "Other / not listed" code. It handles all 7 edge cases, including declining the raccoon and still escalating a rabbit that can't breathe, without declining any real case. On the main cases it's one run behind v2 on most rows, which is within noise at this size; v2 is the only version that caught every emergency. Its one code miss on the edge cases: a dog's smelly ear was coded "Eye discharge" instead of "Other".
+- **v2 → v3.** v3 adds the scope check (cats and dogs, health problems only) and the "Other / not listed" code. Without it, every earlier version triages whatever it's given: v2 still codes the raccoon as "Lump or swelling", exactly as in the original exploratory test, and all three earlier systems book appointments for the raccoon, a hamster and a lead-training question. v3 declines those three, still escalates a rabbit that can't breathe, and declines none of the real cases. On the main cases it's one run behind v2 on most rows, which is within noise at this size; v2 is the only version that caught every emergency. One edge case no version gets right: a dog's smelly ear is coded "Eye discharge" instead of "Other", so the scope fix doesn't cure the pull towards the nearest wrong code.
 - **Versions are compared as written.** v1 and v2 run with the reply formats they were written for. Adding v3's scope fields to them made the 7B model decline real cases (vomiting, a hot spot) as "not a health problem", because their wording doesn't explain the fields: prompt and reply format are versioned together.
 - **One real case.** My cat developed a painful lump after being neutered. I wrote the message before running anything and labelled it with what the vet nurse decided at the time (an appointment the next day). Both wordings matched with every prompt version, and no prompt was tuned on it. It also exposed a gap in the complaint list, so I added a "lump or swelling" code.
 
