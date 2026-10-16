@@ -4,7 +4,7 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from triage import conversation
-from triage.schemas import FollowUpQuestions, build_assessment_schema
+from triage.schemas import ScopedFollowUpQuestions, build_assessment_schema
 from triage.settings import TriageSettings
 
 
@@ -29,7 +29,7 @@ class StandInChains:
     def build_questions_chain(self, chat_model, prompt_version):
         def ask(_inputs):
             self.calls.append("questions")
-            return FollowUpQuestions(
+            return ScopedFollowUpQuestions(
                 **self.question_scope, clarifying_questions=["How long?", "Eating normally?"]
             )
 
@@ -212,3 +212,13 @@ def test_unlisted_complaint_is_triaged_as_other(make_conversation):
     conv.start("My dog's ear smells")
     turn = conv.answer("Three days")
     assert turn.record.complaint_term == "Other / not listed"
+
+
+def test_older_prompt_replies_are_always_in_scope():
+    # A v1/v2 reply has no scope fields, so it can never be declined.
+    no_scope = build_assessment_schema(None, with_scope_check=False)
+    reply = no_scope(
+        **{k: v for k, v in assessment().items() if k not in {"species", "is_health_concern"}}
+    )
+    assert conversation.is_in_scope(reply)
+    assert conversation.reply_species(reply) == "not stated"

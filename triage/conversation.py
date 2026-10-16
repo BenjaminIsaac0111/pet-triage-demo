@@ -30,7 +30,13 @@ from triage.chat_models import build_chat_model
 from triage.flag_recheck import RecheckResult, mark_unclear, recheck_lifted_flags
 from triage.reference_data import load_complaints
 from triage.safety_floor import SafetyFloorResult, apply_safety_floor, find_red_flags
-from triage.schemas import RedFlagCheck, TriageRecord, is_in_scope, out_of_scope_reason
+from triage.schemas import (
+    RedFlagCheck,
+    TriageRecord,
+    is_in_scope,
+    out_of_scope_reason,
+    reply_species,
+)
 from triage.settings import TriageSettings
 
 EMERGENCY_MESSAGE = (
@@ -71,7 +77,11 @@ def _out_of_scope(reply: BaseModel, metrics: dict[str, float]) -> TurnResult:
     """End the conversation without triaging, keeping the model's scope answers as metrics."""
     return TurnResult(
         out_of_scope_reason=out_of_scope_reason(reply),
-        metrics={**metrics, "out_of_scope": 1, "species_supported": int(reply.species != "other")},
+        metrics={
+            **metrics,
+            "out_of_scope": 1,
+            "species_supported": int(reply_species(reply) != "other"),
+        },
     )
 
 
@@ -224,7 +234,7 @@ class TriageConversation:
         return TriageRecord(
             complaint_code=assessment.complaint_code,
             complaint_term=load_complaints()[assessment.complaint_code].term,
-            species=assessment.species,
+            species=reply_species(assessment),
             urgency_tier=final_urgency,
             model_urgency_tier=assessment.urgency_tier,
             safety_floor_applied=safety.floor.floor_raised_urgency,

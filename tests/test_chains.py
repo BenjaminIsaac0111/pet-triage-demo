@@ -8,10 +8,11 @@ from pydantic import ValidationError
 from triage.chains import (
     describe_complaint_codes,
     describe_detected_red_flags,
+    has_scope_check,
     invoke_with_retry,
     load_prompt_text,
 )
-from triage.schemas import FollowUpQuestions
+from triage.schemas import FollowUpQuestions, build_assessment_schema
 
 
 def flaky_chain(failures: int):
@@ -21,10 +22,8 @@ def flaky_chain(failures: int):
     def run(inputs):
         histories_seen.append(inputs["history"])
         if len(histories_seen) <= failures:
-            return FollowUpQuestions(species="dog", is_health_concern=True, clarifying_questions=[])
-        return FollowUpQuestions(
-            species="dog", is_health_concern=True, clarifying_questions=["How long?"]
-        )
+            return FollowUpQuestions(clarifying_questions=[])  # too few: raises
+        return FollowUpQuestions(clarifying_questions=["How long?"])
 
     return RunnableLambda(run), histories_seen
 
@@ -64,3 +63,20 @@ def test_every_prompt_version_has_both_prompts(version):
 
 def test_codes_without_owner_phrases_are_listed_plainly():
     assert "  DEMO-000: Other / not listed" in describe_complaint_codes().splitlines()
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_older_prompts_run_without_the_scope_check(version):
+    # v1 and v2 were written before the scope fields existed; given fields their
+    # wording doesn't explain, a 7B model refused real cases as "not a health problem".
+    assert not has_scope_check(version)
+    assessment_fields = build_assessment_schema(None, has_scope_check(version)).model_fields
+    assert "species" not in assessment_fields and "is_health_concern" not in assessment_fields
+
+
+def test_v3_decides_scope_first():
+    assert has_scope_check("v3")
+    assert list(build_assessment_schema(None, True).model_fields)[:2] == [
+        "species",
+        "is_health_concern",
+    ]

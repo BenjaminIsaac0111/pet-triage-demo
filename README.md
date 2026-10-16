@@ -17,6 +17,8 @@ graph LR
     B -- emergency words --> E
     E --> F{Safety floor}
     F --> G[Record for the vet]
+    C -- not a cat or dog health problem --> X[Politely declined]
+    F -- out of scope and not an emergency --> X
     E -. traces, timings, results .-> H[(MLflow)]
 ```
 
@@ -24,9 +26,10 @@ graph LR
 
 1. **Keyword check.** The owner's words are scanned for emergency phrases ("nothing comes up", "struggling to breathe"). It's free and predictable, but it can't read context like "*not* struggling to breathe".
 2. **Questions.** With no emergency phrase, the LLM asks 2–3 follow-up questions. With one, it skips straight to the assessment.
-3. **Assessment.** The LLM fills a fixed form: summary, complaint code, photo flag, urgency. Codes can only come from our list, enforced while the model writes. For each emergency phrase found, the model also says whether the sign is present, absent or unclear, quoting the owner. That gives the keyword check its context, in the same call.
-4. **Safety floor.** Any emergency phrase forces EMERGENCY, unless the model says the sign is absent, its quote really appears in the owner's words, *and* it gives the same answer when asked 4 more times. The rule can only raise urgency, never lower it.
-5. **Tracking.** Each conversation is one MLflow run: settings as parameters; latency, retries and safety checks as metrics; the record as a JSON file. LangChain autologging captures every prompt and response as a trace.
+3. **Scope.** Before writing anything else, both LLM calls say which animal this is and whether it's a health problem. Code, not the model, applies the rule: anything that isn't a cat or dog health problem is politely declined, with no record and no appointment advice. A likely emergency is never declined. This was added after an exploratory test ("my racoon keeps stealing my food") was coded as "Lump or swelling".
+4. **Assessment.** The LLM fills a fixed form: summary, complaint code, photo flag, urgency. Codes can only come from our list, enforced while the model writes; a problem that isn't on the list is coded "Other / not listed" rather than forced into the nearest wrong code. For each emergency phrase found, the model also says whether the sign is present, absent or unclear, quoting the owner. That gives the keyword check its context, in the same call.
+5. **Safety floor.** Any emergency phrase forces EMERGENCY, unless the model says the sign is absent, its quote really appears in the owner's words, *and* it gives the same answer when asked 4 more times. The rule can only raise urgency, never lower it.
+6. **Tracking.** Each conversation is one MLflow run: settings as parameters; latency, retries and safety checks as metrics; the record as a JSON file. LangChain autologging captures every prompt and response as a trace.
 
 ## Where the code lives
 
@@ -48,19 +51,25 @@ graph LR
 
 ## Results
 
-Model `qwen3.8:27b`, run locally at temperature 0. Six synthetic cases, each worded two ways (12 runs). Counts, not percentages, because the set is small.
+Model `qwen2.5:7b-instruct` (Ollama weights `845dbda0ea48`), run locally at temperature 0, so anyone with Ollama can reproduce it. Six synthetic cases, each worded two ways (12 runs). Counts, not percentages, because the set is small: a difference of one or two runs is noise.
 
-| | Rules only (no LLM) | Prompt v1 | Prompt v2 |
-|---|---|---|---|
-| Emergencies caught | **3 / 4** | 4 / 4 | 4 / 4 |
-| Rated less urgent than expected | **5 / 12** | **2 / 12** | 0 / 12 |
-| Rated more urgent than expected | 1 / 12 | 0 / 12 | 0 / 12 |
-| Complaint code correct | 7 / 12 | 12 / 12 | 12 / 12 |
-| Photo flag correct | 11 / 12 | 11 / 12 | 12 / 12 |
+| | Rules only (no LLM) | Prompt v1 | Prompt v2 | Prompt v3 (default) |
+|---|---|---|---|---|
+| Emergencies caught | **3 / 4** | **3 / 4** | 4 / 4 | **3 / 4** |
+| Rated less urgent than expected | **5 / 12** | 1 / 12 | 0 / 12 | 1 / 12 |
+| Rated more urgent than expected | 1 / 12 | 1 / 12 | 1 / 12 | 2 / 12 |
+| Complaint code correct | 7 / 12 | 11 / 12 | 11 / 12 | 10 / 12 |
+| Photo flag correct | 11 / 12 | 10 / 12 | 10 / 12 | 10 / 12 |
+| Real cases wrongly declined as out of scope | n/a | n/a | n/a | 0 / 12 |
+| Edge cases handled (`--edge-cases`) | n/a | n/a | n/a | 7 / 7 |
 
-- **Rules only** uses just the phrase lists. It missed a blocked cat described as "only a few drops of wee come out", couldn't grade the middle tier, and flagged "*not* struggling to breathe" as an emergency. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
-- **v1 → v2.** v1 rated a spreading skin sore as ROUTINE and asked for a photo of a bloated belly. v2 added plain definitions of each urgency level and "when torn, choose the more urgent level". **v2 was written after seeing these failures, so its perfect score is partly fitted to the test.**
-- **One real case.** My cat developed a painful lump after being neutered. I wrote the message before running anything and labelled it with what the vet nurse decided at the time (an appointment the next day). Both wordings matched, and no prompt was tuned on it. It also exposed a gap in the complaint list, so I added a "lump or swelling" code.
+- **Rules only** uses just the phrase lists. It couldn't grade the middle tier and flagged "*not* struggling to breathe" as an emergency. Most of what the LLM adds is coping with paraphrase and grading the middle tier.
+- **The missed emergency is the same case almost every time:** a blocked cat described as "only a few drops of wee come out". No emergency phrase covers that wording, so it depends on the model alone, and only v2 caught it (once). It's a gap in the phrase list, not in any one prompt.
+- **The over-triage is mostly deliberate.** "He's *not* struggling to breathe" is kept as an emergency when the re-check samples disagree: the safety floor prefers a false alarm to a missed emergency.
+- **v1 → v2.** v2 added plain definitions of each urgency level and "when torn, choose the more urgent level", after v1 under-triaged a spreading skin sore in an earlier run on a larger model (`qwen3.8:27b`). v2 was written after seeing that failure, so its score is partly fitted to the test.
+- **v2 → v3.** v3 adds the scope check (cats and dogs, health problems only) and the "Other / not listed" code. It handles all 7 edge cases, including declining the raccoon and still escalating a rabbit that can't breathe, without declining any real case. On the main cases it's one run behind v2 on most rows, which is within noise at this size; v2 is the only version that caught every emergency. Its one code miss on the edge cases: a dog's smelly ear was coded "Eye discharge" instead of "Other".
+- **Versions are compared as written.** v1 and v2 run with the reply formats they were written for. Adding v3's scope fields to them made the 7B model decline real cases (vomiting, a hot spot) as "not a health problem", because their wording doesn't explain the fields: prompt and reply format are versioned together.
+- **One real case.** My cat developed a painful lump after being neutered. I wrote the message before running anything and labelled it with what the vet nurse decided at the time (an appointment the next day). Both wordings matched with every prompt version, and no prompt was tuned on it. It also exposed a gap in the complaint list, so I added a "lump or swelling" code.
 
 ## Running it
 
