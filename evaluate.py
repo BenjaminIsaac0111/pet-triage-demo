@@ -133,7 +133,8 @@ def run_with_model(settings: TriageSettings, case: dict, owner_message: str):
     started = time.perf_counter()
     with mlflow_tracking.count_tokens() as tokens:
         conversation = TriageConversation(settings)
-        turn = conversation.start(owner_message)
+        # The owner's pick, as in the demo. v1-v3 run as written: they don't use it for scope.
+        turn = conversation.start(owner_message, case["species"])
         mlflow_tracking.log_turn_metrics(turn.metrics)
         if turn.questions:
             turn = conversation.answer(case["scripted_answers"])
@@ -141,7 +142,9 @@ def run_with_model(settings: TriageSettings, case: dict, owner_message: str):
     seconds = time.perf_counter() - started
     mlflow.log_metrics(tokens)
     if turn.out_of_scope_reason:
-        mlflow_tracking.log_out_of_scope(conversation.history, turn.out_of_scope_reason)
+        mlflow_tracking.log_out_of_scope(
+            conversation.history, turn.out_of_scope_reason, turn.emergency_referral
+        )
     else:
         mlflow_tracking.log_conversation_record(conversation.history, turn.record)
     return turn, seconds, tokens

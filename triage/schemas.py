@@ -1,10 +1,10 @@
 """The shapes of data the system passes around.
 
 Two kinds:
-- What the model must fill in: `FollowUpQuestions` or, from prompt v3,
-  `ScopedFollowUpQuestions` (turn 1) and the
-  assessment (turn 2), whose schema is built at runtime so the complaint code
-  can only be one of the codes in our list.
+- What the model must fill in: `FollowUpQuestions` (turn 1; v3 used
+  `ScopedFollowUpQuestions`) and the assessment (turn 2), whose schema is
+  built at runtime so the complaint code can only be one of the codes in our
+  list. `ReplyFormat` says which optional fields each prompt version uses.
 - What our own code produces: `TriageRecord`, the record handed to the vet.
   It adds fields that code can work out reliably, instead of asking the model.
 
@@ -12,6 +12,7 @@ Field names in `TriageRecord` are saved in MLflow, so renaming them would
 break comparisons with older runs.
 """
 
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, Field, create_model, field_validator
@@ -29,13 +30,40 @@ FlagStatus = Literal["present", "absent", "unclear"]
 
 
 # Which animals the service covers. A product decision, not a model one: the
-# service this demo is modelled on focuses on cats and dogs.
+# service this demo is modelled on focuses on cats and dogs. From prompt v4
+# the owner picks the animal, so the model no longer decides it.
 Species = Literal["dog", "cat", "other", "not stated"]
 SUPPORTED_SPECIES = ("dog", "cat", "not stated")  # "not stated": ask, don't refuse
+NOT_A_CAT_OR_DOG = "This service can only help with cats and dogs."
 
-# Shared by both model replies from prompt v3 on, and placed first so the model
-# decides scope before it writes anything else. Older prompts don't ask for
-# them; see `with_scope_check` below.
+ScopeCheck = Literal["none", "model", "owner"]
+
+
+@dataclass(frozen=True)
+class ReplyFormat:
+    """What a prompt version asks the model to fill in.
+
+    Prompts and reply formats are versioned together, so older prompt
+    versions still run exactly as written (see chains.reply_format).
+    """
+
+    # Who decides whether to triage at all:
+    #   "none"  (v1, v2): nobody; everything is triaged.
+    #   "model" (v3): the model says the species and whether it's a health problem.
+    #   "owner" (v4): the owner picks cat, dog or another animal, and code
+    #           declines other animals without calling the model.
+    scope_check: ScopeCheck = "owner"
+    # Tell the model to use DEMO-000 "Other / not listed" when no code fits (v3 on).
+    other_code_hint: bool = True
+    # Up to v3 the model decides whether a photo would help; from v4 code
+    # decides from the complaint category (see `photo_would_help`).
+    model_sets_photo_flag: bool = False
+
+
+LATEST_REPLY_FORMAT = ReplyFormat()
+
+# Used by prompt v3 only, and placed first so the model decides scope before
+# it writes anything else.
 SPECIES_FIELD = Field(
     description="The animal the owner is asking about: dog, cat, other (any other animal, "
     "including wild animals) or not stated."
@@ -64,13 +92,26 @@ def is_in_scope(reply: BaseModel) -> bool:
 def out_of_scope_reason(reply: BaseModel) -> str:
     """A short, owner-facing reason for not triaging. Only call when out of scope."""
     if reply_species(reply) not in SUPPORTED_SPECIES:
-        return "This service can only help with cats and dogs."
+        return NOT_A_CAT_OR_DOG
     return "This doesn't sound like a health problem we can assess."
 
 
 def most_urgent(*tiers: str) -> str:
     """Return the most urgent of the given tiers."""
     return max(tiers, key=URGENCY_RANK.__getitem__)
+
+
+# Complaint categories a vet can judge from a photo: problems on the outside of the body.
+PHOTO_CATEGORIES = {"Skin", "Trauma", "Eye"}
+
+
+def photo_would_help(complaint_code: str, urgency_tier: str) -> bool:
+    """Whether to ask the owner for a photo. Decided by code from prompt v4 on.
+
+    Never in an emergency: the owner should be on the way to a vet, not taking photos.
+    """
+    category = load_complaints()[complaint_code].category
+    return category in PHOTO_CATEGORIES and urgency_tier != "EMERGENCY"
 
 
 QUESTIONS_FIELD = Field(
@@ -81,13 +122,13 @@ QUESTIONS_FIELD = Field(
 
 
 class FollowUpQuestions(BaseModel):
-    """Turn 1: what the assistant asks the owner (prompts v1 and v2)."""
+    """Turn 1: what the assistant asks the owner (every prompt version except v3)."""
 
     clarifying_questions: list[str] = QUESTIONS_FIELD
 
 
 class ScopedFollowUpQuestions(BaseModel):
-    """Turn 1 from prompt v3: decide whether to triage at all, then ask the questions."""
+    """Turn 1 for prompt v3: decide whether to triage at all, then ask the questions."""
 
     species: Species = SPECIES_FIELD
     is_health_concern: bool = HEALTH_CONCERN_FIELD
@@ -108,7 +149,7 @@ class RedFlagCheck(BaseModel):
 
 
 def build_assessment_schema(
-    detected_flag_ids: list[str] | None = None, with_scope_check: bool = True
+    detected_flag_ids: list[str] | None = None, reply_format: ReplyFormat = LATEST_REPLY_FORMAT
 ) -> type[BaseModel]:
     """Build the turn-2 schema, with the allowed values baked in.
 
@@ -120,9 +161,8 @@ def build_assessment_schema(
         detected_flag_ids: the red flags the keyword check found. Limiting
             `flag_id` to these stops the model answering about flags nobody asked about.
             None allows every flag.
-        with_scope_check: add the species and health-concern fields, and the
-            hint to use the "Other" code. True from prompt v3; v1 and v2 were
-            written without them and are run as written.
+        reply_format: which optional fields to include. Older prompt versions
+            run with the fields they were written for (see `ReplyFormat`).
 
     Returns:
         A Pydantic model class to pass to `with_structured_output`.
@@ -138,11 +178,23 @@ def build_assessment_schema(
 
     scope_fields = (
         {"species": (Species, SPECIES_FIELD), "is_health_concern": (bool, HEALTH_CONCERN_FIELD)}
-        if with_scope_check
+        if reply_format.scope_check == "model"
         else {}
     )
     code_description = "The single closest presenting complaint code from the list" + (
-        ", or DEMO-000 if none of them fits." if with_scope_check else "."
+        ", or DEMO-000 if none of them fits." if reply_format.other_code_hint else "."
+    )
+    photo_fields = (
+        {
+            "requires_photo_upload": (
+                bool,
+                Field(
+                    description="True only if the problem is visible on the outside of the body."
+                ),
+            )
+        }
+        if reply_format.model_sets_photo_flag
+        else {}
     )
 
     # Field order matters: the model writes fields in this order, so the
@@ -168,10 +220,7 @@ def build_assessment_schema(
             Literal[allowed_codes],
             Field(description=code_description),
         ),
-        requires_photo_upload=(
-            bool,
-            Field(description="True only if the problem is visible on the outside of the body."),
-        ),
+        **photo_fields,
         urgency_reason=(str, Field(description="One sentence explaining the urgency choice.")),
         urgency_tier=(UrgencyTier, Field(description="EMERGENCY, URGENT_24H or ROUTINE.")),
     )
@@ -182,7 +231,9 @@ class TriageRecord(BaseModel):
 
     complaint_code: str
     complaint_term: str  # looked up from the code, not written by the model
-    species: Species = "not stated"  # defaulted so records from older runs still load
+    # The owner's pick from v4 (the model's answer in v3). Defaulted so records
+    # from older runs still load.
+    species: Species = "not stated"
     urgency_tier: UrgencyTier  # the final urgency, after the safety floor
     model_urgency_tier: UrgencyTier  # what the model said, kept to see when the floor stepped in
     safety_floor_applied: bool
@@ -192,7 +243,7 @@ class TriageRecord(BaseModel):
         default_factory=dict,
         description="For flags the model wanted to dismiss: share of re-check samples that agreed.",
     )
-    requires_photo_upload: bool
+    requires_photo_upload: bool  # from v4, decided by `photo_would_help`, not the model
     owner_summary: str
     urgency_reason: str
     questions_asked: list[str]

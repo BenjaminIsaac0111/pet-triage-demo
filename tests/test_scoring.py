@@ -94,6 +94,9 @@ def test_edge_case_outcomes():
     assert turn_outcome(turn("out_of_scope")) == "out_of_scope"
     assert turn_outcome(turn("emergency")) == "emergency"
     assert turn_outcome(turn("triaged")) == "triaged"
+    # Another animal with an emergency phrase: no record, but told to contact a vet now.
+    referred = SimpleNamespace(out_of_scope_reason="not a cat or dog", emergency_referral=True)
+    assert turn_outcome(referred) == "emergency"
 
 
 def test_edge_case_scores_outcome_and_optional_code():

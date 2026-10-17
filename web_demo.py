@@ -39,6 +39,10 @@ URGENCY_DISPLAY = {
     ),
 }
 
+# The owner picks the animal before describing the problem. Scope is decided
+# here, by the owner, rather than guessed by the model from their words.
+SPECIES_CHOICES = {"Cat": "cat", "Dog": "dog", "Other animal": "other"}
+
 
 # --- Conversation state, kept between Streamlit reruns ---
 
@@ -49,7 +53,9 @@ def reset_state() -> None:
     # describe -> questions -> photo (only if requested) -> done,
     # or straight to out_of_scope from either of the first two.
     state.stage = "describe"
+    state.species = None  # "cat", "dog" or "other", as the owner picked
     state.out_of_scope_reason = None  # set if the conversation ends without triage
+    state.emergency_referral = False  # not triaged, but told to contact a vet now
     state.messages = []  # (role, text) pairs shown in the chat
     state.conversation = None  # the TriageConversation in progress
     state.run_id = None  # the MLflow run this conversation logs to
@@ -81,11 +87,12 @@ def run_tracked_turn(take_turn, *turn_args) -> TurnResult | None:
         return None
 
 
-def start_conversation(owner_message: str, settings: TriageSettings) -> None:
+def start_conversation(owner_message: str, species: str, settings: TriageSettings) -> None:
     state = st.session_state
     state.conversation = TriageConversation(settings)
+    state.species = species
     state.messages.append(("user", owner_message))
-    show_turn(run_tracked_turn(state.conversation.start, owner_message))
+    show_turn(run_tracked_turn(state.conversation.start, owner_message, species))
 
 
 def send_answers(owner_answers: str) -> None:
@@ -110,7 +117,7 @@ def show_turn(turn: TurnResult | None) -> None:
         state.stage = "questions"
         return
     if turn.out_of_scope_reason:
-        end_out_of_scope(turn.out_of_scope_reason)
+        end_out_of_scope(turn.out_of_scope_reason, turn.emergency_referral)
         return
 
     state.record = turn.record
@@ -126,14 +133,16 @@ def show_turn(turn: TurnResult | None) -> None:
         finish_conversation()
 
 
-def end_out_of_scope(reason: str) -> None:
-    """Tell the owner this can't be triaged, and log the conversation."""
+def end_out_of_scope(reason: str, emergency_referral: bool) -> None:
+    """Tell the owner this can't be triaged (or to contact a vet now), and log the conversation."""
     state = st.session_state
     state.out_of_scope_reason = reason
-    state.messages.append(("assistant", f"{reason} {OUT_OF_SCOPE_MESSAGE}"))
+    state.emergency_referral = emergency_referral
+    advice = EMERGENCY_MESSAGE if emergency_referral else OUT_OF_SCOPE_MESSAGE
+    state.messages.append(("assistant", f"{reason} {advice}"))
     with mlflow.start_run(run_id=state.run_id):
         mlflow.log_metric("schema_valid", 1)
-        mlflow_tracking.log_out_of_scope(state.conversation.history, reason)
+        mlflow_tracking.log_out_of_scope(state.conversation.history, reason, emergency_referral)
     state.stage = "out_of_scope"
 
 
@@ -201,7 +210,7 @@ def render_sidebar() -> TriageSettings:
             )
             if clicked:
                 # Started from the chat column, so the "thinking" spinner shows there.
-                state.pending_example = case["owner_inputs"][0]
+                state.pending_example = (case["owner_inputs"][0], case["species"])
 
         st.divider()
         st.caption(
@@ -236,7 +245,9 @@ def render_owner_view(settings: TriageSettings) -> None:
     state = st.session_state
     st.subheader("Owner's view")
     if not state.messages:
-        st.info("Describe what's going on with your pet, or pick an example on the left.")
+        st.info("Pick your pet, then describe what's going on, or pick an example on the left.")
+    elif state.species:
+        st.caption(f"Pet: {state.species}")
     for role, text in state.messages:
         with st.chat_message(role):
             st.markdown(text)
@@ -246,10 +257,17 @@ def render_owner_view(settings: TriageSettings) -> None:
     if state.stage == "photo":
         render_photo_request()
     elif state.stage == "describe":
-        owner_message = st.chat_input("Describe what's going on with your pet")
-        owner_message = owner_message or state.pop("pending_example", None)
-        if owner_message:
-            start_conversation(owner_message, settings)
+        choice = st.radio("Your pet", list(SPECIES_CHOICES), index=None, horizontal=True)
+        owner_message = st.chat_input(
+            "Describe what's going on with your pet" if choice else "Pick your pet first",
+            disabled=choice is None,
+        )
+        example = state.pop("pending_example", None)
+        if example:
+            start_conversation(*example, settings)
+            st.rerun()
+        if owner_message and choice:
+            start_conversation(owner_message, SPECIES_CHOICES[choice], settings)
             st.rerun()
     elif state.stage == "questions":
         owner_answers = st.chat_input("Your answers")
@@ -261,7 +279,10 @@ def render_owner_view(settings: TriageSettings) -> None:
         show_box(advice)
         st.button("Start a new conversation", on_click=reset_state)
     elif state.stage == "out_of_scope":
-        st.info(f"Not triaged. {OUT_OF_SCOPE_MESSAGE}")
+        if state.emergency_referral:
+            st.error("EMERGENCY: " + EMERGENCY_MESSAGE)
+        else:
+            st.info(f"Not triaged. {OUT_OF_SCOPE_MESSAGE}")
         st.button("Start a new conversation", on_click=reset_state)
 
 
@@ -272,6 +293,8 @@ def render_vet_view() -> None:
     st.subheader("Vet's view: triage record")
     if state.out_of_scope_reason:
         st.info(f"No record: not triaged. {state.out_of_scope_reason}")
+        if state.emergency_referral:
+            st.error("An emergency phrase was found, so the owner was told to contact a vet now.")
         return
     if record is None:
         st.caption("The record appears here once the assistant has enough information.")
@@ -279,7 +302,7 @@ def render_vet_view() -> None:
 
     show_box, _advice = URGENCY_DISPLAY[record.urgency_tier]
     show_box(f"**{record.urgency_tier}**")
-    st.markdown(f"#### {record.complaint_term} `{record.complaint_code}`")
+    st.markdown(f"#### {record.complaint_term} `{record.complaint_code}` · {record.species}")
     st.markdown(f"**Owner summary.** {record.owner_summary}")
     st.markdown(f"**Why this urgency.** {record.urgency_reason}")
 

@@ -1,8 +1,9 @@
 {
-  "_note": "GC cases are synthetic, written by a non-vet; their expected labels are reasonable guesses, not clinical ground truth. RC cases are real and say where their labels came from. Each case has a reworded variant to check the result holds when the owner phrases things differently, and a scripted answer used if the system asks follow-up questions.",
+  "_note": "GC cases are synthetic, written by a non-vet; their expected labels are reasonable guesses, not clinical ground truth. RC cases are real and say where their labels came from. Each case has a reworded variant to check the result holds when the owner phrases things differently, and a scripted answer used if the system asks follow-up questions. 'species' is what the owner would pick in the demo.",
   "cases": [
     {
       "case_id": "GC01_blocked_cat",
+      "species": "cat",
       "owner_inputs": [
         "My boy cat Milo keeps going in and out of his litter tray and crying, but barely anything comes out.",
         "Milo (male cat) has been squatting in his tray loads today and only a few drops of wee come out. He yowls when he tries."
@@ -14,6 +15,7 @@
     },
     {
       "case_id": "GC02_hot_spot",
+      "species": "dog",
       "owner_inputs": [
         "There's a red, wet, smelly patch on my retriever's neck that she won't stop scratching. It appeared two days ago.",
         "My golden retriever has a sore, weepy bit of skin on her neck about the size of a coin and she keeps scratching at it."
@@ -25,6 +27,7 @@
     },
     {
       "case_id": "GC03_morning_bile",
+      "species": "dog",
       "owner_inputs": [
         "My dog brings up a bit of yellow foam most mornings before breakfast, then he's totally fine.",
         "Every few mornings my spaniel sicks up a small amount of yellow liquid on an empty stomach. Otherwise he's his usual self."
@@ -36,6 +39,7 @@
     },
     {
       "case_id": "GC04_cut_paw_pad",
+      "species": "dog",
       "owner_inputs": [
         "My dog cut his paw pad on some glass at the park and it's bleeding quite a lot.",
         "Just got back from a walk and my lab has a cut on the bottom of his paw from broken glass, there's blood everywhere."
@@ -47,6 +51,7 @@
     },
     {
       "case_id": "GC05_bloat",
+      "species": "dog",
       "owner_inputs": [
         "My Great Dane keeps trying to be sick but nothing comes up, and his belly looks swollen and tight. He's pacing.",
         "Our big dog is heaving over and over with nothing coming up, his stomach is puffed out and hard, and he can't settle."
@@ -58,6 +63,7 @@
     },
     {
       "case_id": "GC06_sneezing_denied_flag",
+      "species": "cat",
       "owner_inputs": [
         "He's not struggling to breathe or anything, he's just been sneezing a lot since yesterday. Otherwise bouncy.",
         "My cat has had a sneezing fit on and off since yesterday. No problems breathing, eating fine."
@@ -69,6 +75,7 @@
     },
     {
       "case_id": "RC01_lump_after_neutering",
+      "species": "cat",
       "source": "real case: owner's recollection of their own phone call, written down before running the system",
       "label_source": "vet nurse phone triage at the time (advised an appointment the next day)",
       "owner_inputs": [

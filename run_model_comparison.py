@@ -34,7 +34,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--study", default="model-comparison", help="MLflow study tag.")
     parser.add_argument(
         "--prompt-version",
-        default="v3",
+        default="v4",
         help="Held fixed for every model, and passed explicitly so a .env setting can't change it.",
     )
     parser.add_argument("--note", default="", help="Added to each run's description.")

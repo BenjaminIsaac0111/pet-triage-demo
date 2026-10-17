@@ -1,8 +1,9 @@
 {
-  "_note": "Edge cases for scope and unlisted complaints, scored apart from evaluation_cases.json: those measure triage accuracy, these check that the system declines, escalates or falls back correctly. EC01 is a real exploratory test from the web demo, kept as found. Expected outcomes are product decisions (cats and dogs only), not clinical labels.",
+  "_note": "Edge cases for scope and unlisted complaints, scored apart from evaluation_cases.json: those measure triage accuracy, these check that the system declines, escalates or falls back correctly. EC01 is a real exploratory test from the web demo, kept as found. Expected outcomes are product decisions (cats and dogs only), not clinical labels. 'species' is what the owner would pick; from prompt v4 the owner's pick decides scope, while v3 read it from the message.",
   "cases": [
     {
       "case_id": "EC01_raccoon_food_thief",
+      "species": "other",
       "source": "exploratory test in the web demo",
       "owner_message": "Hello, my racoon keeps stealing my food. Could you advise on whether I should bring it in or not.",
       "scripted_answers": "I am not sure what to do, I have tried to keep her outside the room but she figures out how to unlock the door and run in to the kitchen. She has been like this for 2 weeks.",
@@ -11,13 +12,15 @@
     },
     {
       "case_id": "EC02_rabbit_breathing",
+      "species": "other",
       "owner_message": "My rabbit is struggling to breathe and her gums look blue.",
       "scripted_answers": "It started an hour ago. She is lying flat and won't move.",
       "expected_outcome": "emergency",
-      "why": "Out of scope by species, but safety beats scope: the owner must still be told to contact a vet now."
+      "why": "Out of scope by species, but safety beats scope: the owner must still be told to contact a vet now. From v4 the keyword check alone does this, with no model call."
     },
     {
       "case_id": "EC03_hamster_lump",
+      "species": "other",
       "owner_message": "My hamster has a small lump on his side that I noticed this week.",
       "scripted_answers": "It's about the size of a pea. He is eating and running on his wheel as normal.",
       "expected_outcome": "out_of_scope",
@@ -25,6 +28,7 @@
     },
     {
       "case_id": "EC04_dog_smelly_ear",
+      "species": "dog",
       "owner_message": "My dog's ear smells really bad and he keeps shaking his head.",
       "scripted_answers": "About three days. The inside of the ear looks a bit brown and waxy. He's eating fine.",
       "expected_outcome": "triaged",
@@ -33,6 +37,7 @@
     },
     {
       "case_id": "EC05_dog_eating_stones",
+      "species": "dog",
       "owner_message": "My dog has suddenly started eating stones from the garden. She's never done this before.",
       "scripted_answers": "Since last week. She's eating her food and her poo looks normal.",
       "expected_outcome": "triaged",
@@ -40,21 +45,24 @@
     },
     {
       "case_id": "EC06_puppy_lead_training",
+      "species": "dog",
       "owner_message": "How do I stop my puppy pulling on the lead when we go for walks?",
       "scripted_answers": "He's 5 months old and otherwise fine.",
       "expected_outcome": "out_of_scope",
-      "why": "A dog, but a training question rather than a health problem."
+      "why": "A dog, but a training question rather than a health problem. Declining it is ideal, but from v4 a cat or dog is never declined: it goes to the vet as 'Other', the cautious mistake, so the model can't wrongly turn away a real problem."
     },
     {
       "case_id": "EC07_pet_species_not_stated",
+      "species": "dog",
       "owner_message": "My pet has been limping since yesterday.",
       "scripted_answers": "She's a 6 year old spaniel. It's her back leg and she's still eating.",
       "expected_outcome": "triaged",
       "acceptable_codes": ["DEMO-010"],
-      "why": "Species not stated at first: ask, don't refuse."
+      "why": "Species not stated in the message: ask, don't refuse. From v4 the owner picks it up front, so this mainly tests v3."
     },
     {
       "case_id": "EC08_cat_named_lily",
+      "species": "cat",
       "source": "manual test in the web demo",
       "owner_message": "My cat Lily has been sneezing a bit since yesterday but she's eating and playing as normal.",
       "scripted_answers": "No discharge from her eyes or nose. She's 4 and up to date with her vaccinations.",

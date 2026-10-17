@@ -25,8 +25,12 @@ def test_actual_outcome():
     triaged = SimpleNamespace(
         out_of_scope_reason=None, record=SimpleNamespace(urgency_tier="ROUTINE")
     )
+    referred = SimpleNamespace(
+        out_of_scope_reason="not a cat or dog", emergency_referral=True, record=None
+    )
     assert actual_outcome(declined) == OUT_OF_SCOPE
     assert actual_outcome(triaged) == "ROUTINE"
+    assert actual_outcome(referred) == "EMERGENCY"  # told to contact a vet now
 
 
 def test_under_triage_and_false_refusal_are_less_safe():

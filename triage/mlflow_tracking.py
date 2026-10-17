@@ -207,16 +207,25 @@ def log_conversation_record(
     )
 
 
-def log_out_of_scope(history: list[BaseMessage], reason: str) -> None:
+def log_out_of_scope(
+    history: list[BaseMessage], reason: str, emergency_referral: bool = False
+) -> None:
     """Save the transcript of a conversation that was not triaged, and why.
 
     Kept as triage_record.json, like a triaged conversation, so every run has
     one file to read. Reviewing these is how a too-strict scope rule is caught.
+
+    Args:
+        history: the conversation's messages.
+        reason: the owner-facing reason it wasn't triaged.
+        emergency_referral: True if an emergency phrase meant the owner was
+            told to contact a vet now.
     """
     mlflow.log_dict(
         {
             "transcript": [message.model_dump() for message in history],
             "out_of_scope_reason": reason,
+            "emergency_referral": emergency_referral,
         },
         "triage_record.json",
     )

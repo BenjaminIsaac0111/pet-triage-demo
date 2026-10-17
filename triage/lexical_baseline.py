@@ -16,9 +16,8 @@ from dataclasses import dataclass
 
 from triage.reference_data import load_complaints
 from triage.safety_floor import find_red_flags
+from triage.schemas import PHOTO_CATEGORIES
 from triage.text_matching import contains_phrase
-
-VISIBLE_CATEGORIES = {"Skin", "Trauma", "Eye"}
 
 
 @dataclass(frozen=True)
@@ -59,6 +58,6 @@ def triage_with_rules_only(owner_message: str, scripted_answers: str = "") -> Ba
         complaint_code=code,
         urgency_tier=urgency,
         model_urgency_tier=urgency,
-        requires_photo_upload=category in VISIBLE_CATEGORIES,
+        requires_photo_upload=category in PHOTO_CATEGORIES,
         red_flags_detected=detected_flag_ids,
     )

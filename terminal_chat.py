@@ -27,8 +27,19 @@ def show_record(record: TriageRecord) -> None:
     print(json.dumps(record.model_dump(), indent=2))
 
 
+def ask_species() -> str:
+    """Ask which animal this is, until the answer is cat, dog or other."""
+    while True:
+        answer = ask_owner("\nIs your pet a cat, a dog or another animal? [cat/dog/other]\n> ")
+        if not answer:
+            raise SystemExit
+        if answer.lower() in {"cat", "dog", "other"}:
+            return answer.lower()
+
+
 def hold_one_conversation(conversation: TriageConversation) -> None:
-    """Ask for the problem, ask any follow-up questions, then show and log the record."""
+    """Ask for the animal and the problem, ask any follow-up questions, then show and log."""
+    species = ask_species()
     owner_message = ask_owner("\nWhat's going on with your pet? (blank to quit)\n> ")
     if not owner_message:
         raise SystemExit
@@ -37,7 +48,7 @@ def hold_one_conversation(conversation: TriageConversation) -> None:
     with mlflow_tracking.tracked_run(conversation.settings, run_name="cli"):
         started = time.perf_counter()
         try:
-            turn = conversation.start(owner_message)
+            turn = conversation.start(owner_message, species)
             mlflow_tracking.log_turn_metrics(turn.metrics)
             if turn.questions:
                 print("\nA few quick questions:")
@@ -50,8 +61,11 @@ def hold_one_conversation(conversation: TriageConversation) -> None:
             raise
         mlflow.log_metrics({"schema_valid": 1, "total_latency_sec": time.perf_counter() - started})
         if turn.out_of_scope_reason:
-            mlflow_tracking.log_out_of_scope(conversation.history, turn.out_of_scope_reason)
-            print(f"\n{turn.out_of_scope_reason} {OUT_OF_SCOPE_MESSAGE}")
+            mlflow_tracking.log_out_of_scope(
+                conversation.history, turn.out_of_scope_reason, turn.emergency_referral
+            )
+            advice = EMERGENCY_MESSAGE if turn.emergency_referral else OUT_OF_SCOPE_MESSAGE
+            print(f"\n{turn.out_of_scope_reason} {advice}")
             return
         mlflow_tracking.log_conversation_record(conversation.history, turn.record)
         show_record(turn.record)

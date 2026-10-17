@@ -6,13 +6,14 @@ from langchain_core.runnables import RunnableLambda
 from pydantic import ValidationError
 
 from triage.chains import (
+    _prompt_with_history,
     describe_complaint_codes,
     describe_detected_red_flags,
-    has_scope_check,
     invoke_with_retry,
     load_prompt_text,
+    reply_format,
 )
-from triage.schemas import FollowUpQuestions, build_assessment_schema
+from triage.schemas import LATEST_REPLY_FORMAT, FollowUpQuestions, build_assessment_schema
 
 
 def flaky_chain(failures: int):
@@ -53,7 +54,7 @@ def test_red_flag_instructions_name_detected_flags_only():
     assert "empty" in describe_detected_red_flags([])
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v3", "v4"])
 def test_every_prompt_version_has_both_prompts(version):
     assert load_prompt_text(version, "follow_up_questions")
     assessment_prompt = load_prompt_text(version, "assessment")
@@ -69,14 +70,38 @@ def test_codes_without_owner_phrases_are_listed_plainly():
 def test_older_prompts_run_without_the_scope_check(version):
     # v1 and v2 were written before the scope fields existed; given fields their
     # wording doesn't explain, a 7B model refused real cases as "not a health problem".
-    assert not has_scope_check(version)
-    assessment_fields = build_assessment_schema(None, has_scope_check(version)).model_fields
+    assert reply_format(version).scope_check == "none"
+    assessment_fields = build_assessment_schema(None, reply_format(version)).model_fields
     assert "species" not in assessment_fields and "is_health_concern" not in assessment_fields
+    assert "requires_photo_upload" in assessment_fields
 
 
 def test_v3_decides_scope_first():
-    assert has_scope_check("v3")
-    assert list(build_assessment_schema(None, True).model_fields)[:2] == [
+    assert reply_format("v3").scope_check == "model"
+    assert list(build_assessment_schema(None, reply_format("v3")).model_fields)[:2] == [
         "species",
         "is_health_concern",
     ]
+
+
+def test_v4_leaves_scope_and_photo_to_code():
+    assert reply_format("v4").scope_check == "owner"
+    fields = build_assessment_schema(None, reply_format("v4")).model_fields
+    assert not {"species", "is_health_concern", "requires_photo_upload"} & set(fields)
+
+
+def test_unlisted_versions_use_the_latest_format():
+    assert reply_format("v99") == LATEST_REPLY_FORMAT
+
+
+def test_v4_prompts_name_the_animal_the_owner_picked():
+    for prompt_name in ("follow_up_questions", "assessment"):
+        prompt = _prompt_with_history(load_prompt_text("v4", prompt_name), "cat")
+        filled = prompt.partial(complaint_list="", red_flag_instructions="")
+        system_text = filled.invoke({"history": []}).to_messages()[0].content
+        assert "The owner's pet is a cat." in system_text
+
+
+def test_older_prompts_ignore_the_animal():
+    prompt = _prompt_with_history(load_prompt_text("v3", "follow_up_questions"), "cat")
+    assert "The owner's pet is" not in prompt.invoke({"history": []}).to_messages()[0].content

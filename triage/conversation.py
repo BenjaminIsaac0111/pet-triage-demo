@@ -1,6 +1,8 @@
 """The two-turn triage conversation, independent of any UI or tracking.
 
-Turn 1, `start`: the owner describes the problem.
+Turn 1, `start`: the owner picks cat, dog or another animal, and describes the problem.
+  - Another animal is declined by code, without calling the model. The
+    keyword check still runs: an emergency phrase gets "contact a vet now".
   - If the keyword check finds an emergency phrase, the questions are skipped
     and the assessment runs straight away. If the emergency is confirmed, the
     owner should be told to contact a vet now: nobody should answer questions
@@ -8,12 +10,10 @@ Turn 1, `start`: the owner describes the problem.
   - Otherwise the model asks 2-3 follow-up questions.
 Turn 2, `answer`: the owner answers, and the model fills the triage record.
 
-Either turn can instead end the conversation as out of scope: an animal the
-service doesn't cover, or something that isn't a health problem. A confirmed
-emergency is never turned away for being out of scope. Only an emergency
-phrase sends a message straight to the assessment, so an emergency the
-keyword check misses can still be declined at the questions step (with
-advice to contact a vet).
+Scope is the owner's choice from prompt v4, so a cat or dog is never turned
+away. Prompt v3 let the model decide instead (species, and whether it's a
+health problem), which could decline real problems; it's kept so the two
+can be compared.
 
 Each turn returns a `TurnResult` whose `metrics` (timings, retries, safety
 checks) the callers log to MLflow: web_demo.py, terminal_chat.py, evaluate.py.
@@ -27,16 +27,23 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 
-from triage.chains import build_assessment_chain, build_questions_chain, invoke_with_retry
+from triage.chains import (
+    build_assessment_chain,
+    build_questions_chain,
+    invoke_with_retry,
+    reply_format,
+)
 from triage.chat_models import build_chat_model
 from triage.flag_recheck import RecheckResult, mark_unclear, recheck_lifted_flags
 from triage.reference_data import load_complaints
 from triage.safety_floor import SafetyFloorResult, apply_safety_floor, find_red_flags
 from triage.schemas import (
+    NOT_A_CAT_OR_DOG,
     RedFlagCheck,
     TriageRecord,
     is_in_scope,
     out_of_scope_reason,
+    photo_would_help,
     reply_species,
 )
 from triage.settings import TriageSettings
@@ -56,6 +63,8 @@ class TurnResult:
     questions: list[str] | None = None
     record: TriageRecord | None = None
     out_of_scope_reason: str | None = None  # owner-facing; shown with OUT_OF_SCOPE_MESSAGE
+    # Out of scope, but an emergency phrase was found: show EMERGENCY_MESSAGE instead.
+    emergency_referral: bool = False
     metrics: dict[str, float] = field(default_factory=dict)  # logged to MLflow by the caller
 
 
@@ -87,12 +96,31 @@ def _out_of_scope(reply: BaseModel, metrics: dict[str, float]) -> TurnResult:
     )
 
 
+def _screen_other_animal(owner_message: str) -> TurnResult:
+    """Another animal: declined by code, with no model call.
+
+    The keyword check still runs, because safety beats scope: a rabbit that
+    can't breathe gets "contact a vet now" rather than a plain decline.
+    """
+    detected_flag_ids = find_red_flags(owner_message)
+    return TurnResult(
+        out_of_scope_reason=NOT_A_CAT_OR_DOG,
+        emergency_referral=bool(detected_flag_ids),
+        metrics={
+            "out_of_scope": 1,
+            "species_supported": 0,
+            "red_flags_detected": len(detected_flag_ids),
+            "emergency_referral": int(bool(detected_flag_ids)),
+        },
+    )
+
+
 class TriageConversation:
     """One owner's conversation, from the first message to the record for the vet.
 
     Example:
         conversation = TriageConversation(TriageSettings())
-        turn = conversation.start("My dog keeps being sick")
+        turn = conversation.start("My dog keeps being sick", species="dog")
         if turn.questions:  # the usual path: questions first, then the record
             turn = conversation.answer("Since this morning, but he's still eating")
         print(turn.record)
@@ -119,8 +147,10 @@ class TriageConversation:
         self.recheck_chat_model = recheck_chat_model or build_chat_model(
             self.settings, temperature=self.settings.lift_check_temperature
         )
+        self.reply_format = reply_format(self.settings.prompt_version)
         self.history: list[BaseMessage] = []  # every message so far, owner and assistant
         self.questions_asked: list[str] = []
+        self.species = "not stated"  # what the owner picked
 
     @property
     def all_owner_text(self) -> str:
@@ -129,12 +159,23 @@ class TriageConversation:
 
     # --- The two turns ---
 
-    def start(self, owner_message: str) -> TurnResult:
-        """Turn 1. Returns follow-up questions, or the final record if an emergency is confirmed."""
+    def start(self, owner_message: str, species: str | None = None) -> TurnResult:
+        """Turn 1. Returns follow-up questions, or the final record if an emergency is confirmed.
+
+        Args:
+            owner_message: the owner's description of the problem.
+            species: what the owner picked: "cat", "dog" or "other". From
+                prompt v4 "other" is declined by code. None means not stated.
+        """
         # TODO: Allow another round of questions when answers are vague or
         # contradictory. Today there is exactly one round.
+        if species not in (None, "cat", "dog", "other"):
+            raise ValueError(f"species must be cat, dog or other, not {species!r}")
         self.history = [HumanMessage(content=owner_message)]
         self.questions_asked = []
+        self.species = species or "not stated"
+        if self.species == "other" and self.reply_format.scope_check == "owner":
+            return _screen_other_animal(owner_message)
 
         early_assessment_metrics = {}
         if find_red_flags(owner_message):
@@ -155,10 +196,10 @@ class TriageConversation:
     # --- The steps behind each turn ---
 
     def _ask_follow_up_questions(self, extra_metrics: dict[str, float]) -> TurnResult:
-        chain = build_questions_chain(self.chat_model, self.settings.prompt_version)
+        chain = build_questions_chain(self.chat_model, self.settings.prompt_version, self.species)
         reply, retries, latency = _call_and_time(chain, self.history)
         metrics = {"questions_latency_sec": latency, "questions_retries": retries, **extra_metrics}
-        if not is_in_scope(reply):
+        if self.reply_format.scope_check == "model" and not is_in_scope(reply):
             return _out_of_scope(reply, metrics)
 
         self.questions_asked = reply.clarifying_questions
@@ -173,7 +214,7 @@ class TriageConversation:
         owner_text = self.all_owner_text
         detected_flag_ids = find_red_flags(owner_text)
         chain = build_assessment_chain(
-            self.chat_model, self.settings.prompt_version, detected_flag_ids
+            self.chat_model, self.settings.prompt_version, detected_flag_ids, self.species
         )
         assessment, retries, latency = _call_and_time(chain, self.history)
 
@@ -188,8 +229,10 @@ class TriageConversation:
             "safety_floor_applied": int(safety.floor.floor_raised_urgency),
             **(safety.recheck.metrics if safety.recheck else {}),
         }
-        # Safety beats scope: an emergency in any animal still gets "contact a vet now".
-        if record.urgency_tier != "EMERGENCY" and not is_in_scope(assessment):
+        # v3 only: the model's scope answers can end the conversation. Safety beats
+        # scope, so an emergency in any animal still gets "contact a vet now".
+        model_declines = self.reply_format.scope_check == "model" and not is_in_scope(assessment)
+        if model_declines and record.urgency_tier != "EMERGENCY":
             return _out_of_scope(assessment, metrics)
         return TurnResult(record=record, metrics=metrics)
 
@@ -210,7 +253,10 @@ class TriageConversation:
 
         recheck = recheck_lifted_flags(
             sampling_chain=build_assessment_chain(
-                self.recheck_chat_model, self.settings.prompt_version, detected_flag_ids
+                self.recheck_chat_model,
+                self.settings.prompt_version,
+                detected_flag_ids,
+                self.species,
             ),
             history=self.history,
             lifted_flag_ids=floor.flags_lifted,
@@ -233,17 +279,22 @@ class TriageConversation:
     ) -> TriageRecord:
         """Combine the model's assessment with what our code worked out."""
         final_urgency = safety.floor.urgency_tier
+        if self.reply_format.model_sets_photo_flag:  # up to v3
+            requires_photo = assessment.requires_photo_upload
+        else:
+            requires_photo = photo_would_help(assessment.complaint_code, final_urgency)
         return TriageRecord(
             complaint_code=assessment.complaint_code,
             complaint_term=load_complaints()[assessment.complaint_code].term,
-            species=reply_species(assessment),
+            # The owner's pick wins; v3's model answer is used only if they didn't pick.
+            species=self.species if self.species != "not stated" else reply_species(assessment),
             urgency_tier=final_urgency,
             model_urgency_tier=assessment.urgency_tier,
             safety_floor_applied=safety.floor.floor_raised_urgency,
             red_flags_detected=detected_flag_ids,
             red_flag_checks=[check.model_dump() for check in safety.flag_checks],
             flag_lift_agreement=safety.recheck.agreement if safety.recheck else {},
-            requires_photo_upload=assessment.requires_photo_upload,
+            requires_photo_upload=requires_photo,
             owner_summary=assessment.owner_summary,
             urgency_reason=assessment.urgency_reason,
             questions_asked=self.questions_asked,

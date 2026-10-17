@@ -29,8 +29,9 @@ class TriageSettings:
     temperature: float = field(default_factory=lambda: float(_from_env("TRIAGE_TEMPERATURE", "0")))
 
     # Which folder under prompts/ to use. v2 fixed v1's failures (see the README);
-    # v3 adds the scope check and the "Other" code.
-    prompt_version: str = field(default_factory=lambda: _from_env("TRIAGE_PROMPT_VERSION", "v3"))
+    # v3 added the model's scope check and the "Other" code; v4 lets the owner
+    # pick the animal and has code decide the photo request.
+    prompt_version: str = field(default_factory=lambda: _from_env("TRIAGE_PROMPT_VERSION", "v4"))
 
     # Only for Ollama on another machine. OpenAI-compatible servers use
     # OPENAI_BASE_URL, which their SDK reads directly.

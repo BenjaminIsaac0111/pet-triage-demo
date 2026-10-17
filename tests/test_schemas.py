@@ -5,6 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from triage.chains import reply_format
 from triage.reference_data import (
     DATA_DIR,
     load_complaints,
@@ -12,7 +13,7 @@ from triage.reference_data import (
     load_evaluation_cases,
     load_red_flags,
 )
-from triage.schemas import TriageRecord, build_assessment_schema, most_urgent
+from triage.schemas import TriageRecord, build_assessment_schema, most_urgent, photo_would_help
 
 
 def valid_assessment(**overrides):
@@ -65,14 +66,34 @@ def test_evidence_fields_come_before_decision_fields():
     assert field_order.index("red_flag_checks") < field_order.index("urgency_tier")
 
 
-def test_scope_is_decided_before_anything_else():
-    field_order = list(build_assessment_schema().model_fields)
+def test_v3_scope_is_decided_before_anything_else():
+    field_order = list(build_assessment_schema(None, reply_format("v3")).model_fields)
     assert field_order[:2] == ["species", "is_health_concern"]
 
 
-def test_unknown_species_is_rejected():
+def test_v3_unknown_species_is_rejected():
     with pytest.raises(ValidationError):
-        build_assessment_schema()(**valid_assessment(species="raccoon"))
+        build_assessment_schema(None, reply_format("v3"))(**valid_assessment(species="raccoon"))
+
+
+@pytest.mark.parametrize(
+    ("code", "urgency", "expected"),
+    [
+        ("DEMO-005", "URGENT_24H", True),  # skin lesion
+        ("DEMO-013", "ROUTINE", True),  # eye discharge
+        ("DEMO-006", "URGENT_24H", True),  # wound
+        ("DEMO-006", "EMERGENCY", False),  # no photos in an emergency
+        ("DEMO-001", "ROUTINE", False),  # vomiting: nothing to see
+        ("DEMO-000", "ROUTINE", False),  # other / not listed
+    ],
+)
+def test_photo_would_help(code, urgency, expected):
+    assert photo_would_help(code, urgency) is expected
+
+
+def test_every_case_has_the_owners_species():
+    for case in load_evaluation_cases() + load_edge_cases():
+        assert case["species"] in {"cat", "dog", "other"}, case["case_id"]
 
 
 def test_edge_cases_use_real_codes_and_outcomes():

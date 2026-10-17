@@ -21,6 +21,27 @@ def test_web_demo_renders(monkeypatch, tmp_path):
     assert not app.exception
     assert "Pet Triage Demo" in app.title[0].value
     assert len(app.chat_input) == 1  # waiting for the owner's first message
+    assert app.chat_input[0].disabled  # until they pick cat, dog or another animal
+
+
+@pytest.mark.parametrize(
+    ("message", "shows_emergency"),
+    [
+        ("My hamster has a small lump on his side", False),
+        ("My rabbit is struggling to breathe and her gums look blue", True),
+    ],
+)
+def test_web_demo_other_animal_needs_no_model(monkeypatch, tmp_path, message, shows_emergency):
+    # "Other animal" is decided by code, so this runs without Ollama.
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    app = AppTest.from_file("../web_demo.py").run(timeout=60)
+    app.radio[0].set_value("Other animal").run(timeout=60)
+    app.chat_input[0].set_value(message).run(timeout=60)
+    assert not app.exception
+    assert any("cats and dogs" in box.value for box in app.info)
+    assert any("EMERGENCY" in box.value for box in app.error) is shows_emergency
 
 
 def ollama_running() -> bool:

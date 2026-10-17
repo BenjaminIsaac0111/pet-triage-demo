@@ -42,9 +42,13 @@ def expected_outcome(case: dict) -> str:
 
 
 def actual_outcome(turn) -> str:
-    """The column for a finished conversation: its final tier, or OUT_OF_SCOPE."""
+    """The column for a finished conversation: its final tier, or OUT_OF_SCOPE.
+
+    Another animal with an emergency phrase goes in the EMERGENCY column: the
+    owner was told to contact a vet now, even though there's no record.
+    """
     if turn.out_of_scope_reason:
-        return OUT_OF_SCOPE
+        return "EMERGENCY" if getattr(turn, "emergency_referral", False) else OUT_OF_SCOPE
     return turn.record.urgency_tier
 
 

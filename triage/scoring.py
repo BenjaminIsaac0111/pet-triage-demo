@@ -108,9 +108,13 @@ class EvaluationTally:
 
 
 def turn_outcome(turn) -> str:
-    """How a conversation ended: "out_of_scope", "emergency" or "triaged"."""
+    """How a conversation ended: "out_of_scope", "emergency" or "triaged".
+
+    Another animal with an emergency phrase counts as "emergency": the owner
+    was told to contact a vet now, even though there's no record.
+    """
     if turn.out_of_scope_reason:
-        return "out_of_scope"
+        return "emergency" if getattr(turn, "emergency_referral", False) else "out_of_scope"
     return "emergency" if turn.record.urgency_tier == "EMERGENCY" else "triaged"
 
 
