@@ -22,7 +22,16 @@ graph LR
     E --> F{Safety floor and photo rule}
     F --> G[Record for the vet]
     E -. traces, timings, results .-> H[(MLflow)]
+
+    V[("Planned: VeNom code lookup<br/>(hybrid search, top candidates)")] -.-> E
+    D -.-> M["Planned: animal mismatch check<br/>(ask the owner once)"]
+    X -.-> R["Planned: hand-off to reception"]
+    H -.-> O["Planned: monitoring<br/>(vet overrides, false alarms, drift)"]
+    classDef planned stroke-dasharray: 5 5
+    class V,M,R,O planned
 ```
+
+Dashed boxes are planned, not built. Today the 16 placeholder codes are listed in the prompt; with the real VeNom list, a lookup would narrow it to a few candidates that become the allowed values in the record.
 
 ## How it works
 
