@@ -16,5 +16,6 @@ Supporting modules:
     text_matching.py     shared text clean-up for phrase matching
     mlflow_tracking.py   what gets logged to MLflow
     scoring.py           scores a record against a test case
+    outcome_matrix.py    expected against actual outcome, logged by the evaluation
     lexical_baseline.py  rules-only baseline, to show what the model adds
 """
