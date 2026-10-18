@@ -6,7 +6,7 @@ A small demo of **LangChain**, **MLflow** and a local model run with **Ollama**.
 
 ## What it shows
 
-- **A LangChain chain that asks questions.** Two main model calls: one asks the follow-up questions, one writes the vet's note. The model has to reply in a fixed format, so it can only pick complaint codes from our list.
+- **A LangChain chain that asks questions.** Two main model calls: one asks the follow-up questions, one writes the vet's note. Each reply has to fill in a fixed form defined in Pydantic (`triage/schemas.py`), so the model can only pick complaint codes from our list.
 - **MLflow tracking and comparison.** Every conversation is logged: settings, timings, the note, and a trace of each model call. I used it to compare four prompt versions against a rules-only baseline on the same test cases.
 - **Judgement about where the model fits.** The model reads messy text and asks questions. Plain code makes the safety decisions: which animals are covered, the final urgency (code can raise the model's choice, never lower it), and when to ask for a photo. **The model suggests, code decides.**
 
@@ -16,44 +16,44 @@ A small demo of **LangChain**, **MLflow** and a local model run with **Ollama**.
 graph TD
     S@{ shape: sl-rect, label: "Owner picks cat, dog or other" }
     A@{ shape: sl-rect, label: "Owner describes the problem" }
-    B@{ shape: diam, label: "Emergency words?" }
-    X@{ shape: stadium, label: "Declined, or 'contact a vet now' if emergency words" }
-    C@{ shape: rect, label: "Model asks follow-up questions" }
+    B@{ shape: diam, label: "Any emergency words? e.g. 'nothing comes up', 'struggling to breathe', 'hit by a car'" }
+    X@{ shape: stadium, label: "Other animal: politely declined, or told 'contact a vet now' if emergency words were found" }
+    C@{ shape: rect, label: "Model asks follow-up questions (Pydantic schema: 1 to 3 questions)" }
     D@{ shape: sl-rect, label: "Owner answers" }
-    E@{ shape: rect, label: "Model writes the note" }
-    F@{ shape: fr-rect, label: "Code applies the safety and photo rules" }
-    G@{ shape: doc, label: "Note for the vet" }
-    H@{ shape: cyl, label: "MLflow" }
+    E@{ shape: rect, label: "Model fills in the note (Pydantic schema: summary, complaint code, urgency, reason, check of each emergency sign)" }
+    K@{ shape: h-cyl, label: "Complaint code list: 16 demo codes now, full VeNom index later" }
+    F@{ shape: fr-rect, label: "Code rules: an emergency word keeps it an emergency unless the owner's own words rule it out; photo only for skin, wound or eye problems" }
+    G@{ shape: doc, label: "Note for the vet: complaint, urgency, photo request, summary" }
+    H@{ shape: cyl, label: "MLflow: settings, timings, traces and results" }
 
     S --> A --> B
     B -- other animal --> X
     B -- cat or dog, none found --> C
     C --> D --> E
-    B -- cat or dog, found --> E
+    B -- "cat or dog, found: assess straight away" --> E
+    K -- allowed codes only --> E
     E --> F --> G
     E -. every call logged .-> H
 
-    P@{ shape: lin-doc, label: "Idea: pet's health record" }
-    V@{ shape: h-cyl, label: "Idea: VeNom code index" }
-    M@{ shape: diam, label: "Idea: animal matches?" }
-    R@{ shape: trap-t, label: "Idea: pass to reception" }
-    O@{ shape: curv-trap, label: "Idea: monitoring dashboard" }
+    P@{ shape: lin-doc, label: "Idea: pet's health record (history, medicines, past visits)" }
+    M@{ shape: diam, label: "Idea: does what the owner wrote match the animal they picked? If not, ask once" }
+    R@{ shape: trap-t, label: "Idea: pass to reception, who can suggest a suitable vet" }
+    O@{ shape: curv-trap, label: "Idea: monitoring dashboard (vet corrections, false alarms)" }
     P -.-> C
     P -.-> E
-    V -. search .-> E
     D -.-> M
     X -.-> R
     H -.-> O
     classDef idea stroke-dasharray: 5 5
-    class P,V,M,R,O idea
+    class P,M,R,O idea
 ```
 
-Key: slanted box = something the owner types or picks · rectangle = a model step · double-edged box = a fixed rule in code · diamond = a check that branches · rounded box = the conversation ends · document = the note for the vet · cylinder = stored data · dashed = an idea, not built.
+Key: slanted box = something the owner types or picks · rectangle = a model step · double-edged box = a fixed rule in code · diamond = a check that branches · rounded box = the conversation ends · document = the note for the vet · lined document = a record · cylinder = stored data · horizontal cylinder = a code list the model must choose from · trapezoid = done by a person · curved box = a dashboard · dashed = an idea, not built.
 
 1. **Pick the animal.** Cat, dog or other. Other animals are politely declined without calling the model, unless the message mentions an emergency sign; then the owner is told to contact a vet now.
 2. **Check for emergency words**, such as "nothing comes up" or "struggling to breathe". If one is found, the model assesses the case straight away, and a confirmed emergency skips the questions. Word matching can't see "*not* struggling to breathe", so the model is asked whether each sign is really there, quoting the owner.
 3. **Ask questions.** The model asks a few follow-up questions (one or two in testing).
-4. **Write the note.** The model picks a complaint code and an urgency: emergency, within 24 hours, or routine.
+4. **Write the note.** The model fills in a fixed form: a summary, a complaint code from the list, an urgency (emergency, within 24 hours, or routine) and a one-line reason. Today the list has 16 made-up demo codes; with the real VeNom list, a search would pick a shortlist for the model to choose from.
 5. **Apply the rules.** If an emergency word was found, the case stays an emergency unless the model shows, in the owner's own words, that the sign isn't there, and gives the same answer 4 more times. This rule can raise urgency but never lower it. Code also decides the photo request: skin, wound and eye problems, never in an emergency.
 
 | File | What it does |
