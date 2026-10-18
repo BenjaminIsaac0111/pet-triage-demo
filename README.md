@@ -13,29 +13,42 @@ A small demo of **LangChain**, **MLflow** and a local model run with **Ollama**.
 ## How it works
 
 ```mermaid
-graph LR
-    S[Owner picks cat, dog or other] --> A[Owner describes the problem]
-    A --> B{Check for emergency words}
-    B -- other animal --> X[Declined, or 'contact a vet now' if emergency words]
-    B -- cat or dog, none found --> C[Model asks follow-up questions]
-    C --> D[Owner answers]
-    D --> E[Model writes the note]
-    B -- cat or dog, found --> E
-    E --> F{Safety rule and photo rule}
-    F --> G[Note for the vet]
-    E -. every call logged .-> H[(MLflow)]
+graph TD
+    S@{ shape: sl-rect, label: "Owner picks cat, dog or other" }
+    A@{ shape: sl-rect, label: "Owner describes the problem" }
+    B@{ shape: diam, label: "Emergency words?" }
+    X@{ shape: stadium, label: "Declined, or 'contact a vet now' if emergency words" }
+    C@{ shape: rect, label: "Model asks follow-up questions" }
+    D@{ shape: sl-rect, label: "Owner answers" }
+    E@{ shape: rect, label: "Model writes the note" }
+    F@{ shape: fr-rect, label: "Code applies the safety and photo rules" }
+    G@{ shape: doc, label: "Note for the vet" }
+    H@{ shape: cyl, label: "MLflow" }
 
-    P["Idea: pet's health record"] -.-> C
+    S --> A --> B
+    B -- other animal --> X
+    B -- cat or dog, none found --> C
+    C --> D --> E
+    B -- cat or dog, found --> E
+    E --> F --> G
+    E -. every call logged .-> H
+
+    P@{ shape: lin-doc, label: "Idea: pet's health record" }
+    V@{ shape: h-cyl, label: "Idea: VeNom code index" }
+    M@{ shape: diam, label: "Idea: animal matches?" }
+    R@{ shape: trap-t, label: "Idea: pass to reception" }
+    O@{ shape: curv-trap, label: "Idea: monitoring dashboard" }
+    P -.-> C
     P -.-> E
-    V["Idea: search the full VeNom code list"] -.-> E
-    D -.-> M["Idea: check the animal matches"]
-    X -.-> R["Idea: pass to reception"]
-    H -.-> O["Idea: monitoring"]
+    V -. search .-> E
+    D -.-> M
+    X -.-> R
+    H -.-> O
     classDef idea stroke-dasharray: 5 5
     class P,V,M,R,O idea
 ```
 
-Dashed boxes are ideas, not built.
+Key: slanted box = something the owner types or picks · rectangle = a model step · double-edged box = a fixed rule in code · diamond = a check that branches · rounded box = the conversation ends · document = the note for the vet · cylinder = stored data · dashed = an idea, not built.
 
 1. **Pick the animal.** Cat, dog or other. Other animals are politely declined without calling the model, unless the message mentions an emergency sign; then the owner is told to contact a vet now.
 2. **Check for emergency words**, such as "nothing comes up" or "struggling to breathe". If one is found, the model assesses the case straight away, and a confirmed emergency skips the questions. Word matching can't see "*not* struggling to breathe", so the model is asked whether each sign is really there, quoting the owner.
