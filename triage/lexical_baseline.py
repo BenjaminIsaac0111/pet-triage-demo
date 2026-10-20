@@ -15,9 +15,8 @@ scripted answers unless an emergency phrase means the questions are skipped.
 from dataclasses import dataclass
 
 from triage.reference_data import load_complaints
-from triage.safety_floor import find_red_flags
+from triage.safety_floor import contains_phrase, find_red_flags
 from triage.schemas import PHOTO_CATEGORIES
-from triage.text_matching import contains_phrase
 
 
 @dataclass(frozen=True)

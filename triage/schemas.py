@@ -20,14 +20,7 @@ from pydantic import BaseModel, Field, create_model, field_validator
 from triage.reference_data import load_complaints, load_red_flags
 
 UrgencyTier = Literal["EMERGENCY", "URGENT_24H", "ROUTINE"]
-
-# Lets code compare tiers: a higher number is more urgent.
-URGENCY_RANK: dict[str, int] = {"ROUTINE": 0, "URGENT_24H": 1, "EMERGENCY": 2}
-
-# present = happening now or recently; absent = the owner clearly says it isn't
-# happening; unclear = can't tell. Doubt is treated as present (see safety_floor.py).
-FlagStatus = Literal["present", "absent", "unclear"]
-
+URGENCY_RANK = {"ROUTINE": 0, "URGENT_24H": 1, "EMERGENCY": 2}  # higher is more urgent
 
 # Which animals the service covers. A product decision, not a model one: the
 # service this demo is modelled on focuses on cats and dogs. From prompt v4
@@ -36,15 +29,13 @@ Species = Literal["dog", "cat", "other", "not stated"]
 SUPPORTED_SPECIES = ("dog", "cat", "not stated")  # "not stated": ask, don't refuse
 NOT_A_CAT_OR_DOG = "This service can only help with cats and dogs."
 
-ScopeCheck = Literal["none", "model", "owner"]
-
 
 @dataclass(frozen=True)
 class ReplyFormat:
     """What a prompt version asks the model to fill in.
 
     Prompts and reply formats are versioned together, so older prompt
-    versions still run exactly as written (see chains.reply_format).
+    versions still run exactly as written.
     """
 
     # Who decides whether to triage at all:
@@ -52,7 +43,7 @@ class ReplyFormat:
     #   "model" (v3): the model says the species and whether it's a health problem.
     #   "owner" (v4): the owner picks cat, dog or another animal, and code
     #           declines other animals without calling the model.
-    scope_check: ScopeCheck = "owner"
+    scope_check: Literal["none", "model", "owner"] = "owner"
     # Tell the model to use DEMO-000 "Other / not listed" when no code fits (v3 on).
     other_code_hint: bool = True
     # Up to v3 the model decides whether a photo would help; from v4 code
@@ -60,7 +51,23 @@ class ReplyFormat:
     model_sets_photo_flag: bool = False
 
 
+# Older prompt versions run with the reply formats they were written for:
+# adding fields their wording doesn't explain made a 7B model refuse real
+# cases as "not a health problem". Versions not listed use the latest format.
+REPLY_FORMATS = {
+    "v1": ReplyFormat(scope_check="none", other_code_hint=False, model_sets_photo_flag=True),
+    "v2": ReplyFormat(scope_check="none", other_code_hint=False, model_sets_photo_flag=True),
+    "v3": ReplyFormat(scope_check="model", model_sets_photo_flag=True),
+}
+
+
 LATEST_REPLY_FORMAT = ReplyFormat()
+
+
+def reply_format_for(prompt_version: str) -> ReplyFormat:
+    """What the model fills in for this prompt version."""
+    return REPLY_FORMATS.get(prompt_version, LATEST_REPLY_FORMAT)
+
 
 # Used by prompt v3 only, and placed first so the model decides scope before
 # it writes anything else.
@@ -74,46 +81,6 @@ HEALTH_CONCERN_FIELD = Field(
     "stones, sudden aggression). False if they want something else, e.g. help with "
     "training, keeping an animal out of the house, or general chat."
 )
-
-
-def reply_species(reply: BaseModel) -> str:
-    """The species a reply gives, or "not stated" for a schema without the scope check."""
-    return getattr(reply, "species", "not stated")
-
-
-def is_in_scope(reply: BaseModel) -> bool:
-    """Whether a model reply describes something this service should triage.
-
-    Replies from schemas without the scope check are always in scope.
-    """
-    return reply_species(reply) in SUPPORTED_SPECIES and getattr(reply, "is_health_concern", True)
-
-
-def out_of_scope_reason(reply: BaseModel) -> str:
-    """A short, owner-facing reason for not triaging. Only call when out of scope."""
-    if reply_species(reply) not in SUPPORTED_SPECIES:
-        return NOT_A_CAT_OR_DOG
-    return "This doesn't sound like a health problem we can assess."
-
-
-def most_urgent(*tiers: str) -> str:
-    """Return the most urgent of the given tiers."""
-    return max(tiers, key=URGENCY_RANK.__getitem__)
-
-
-# Complaint categories a vet can judge from a photo: problems on the outside of the body.
-PHOTO_CATEGORIES = {"Skin", "Trauma", "Eye"}
-
-
-def photo_would_help(complaint_code: str, urgency_tier: str) -> bool:
-    """Whether to ask the owner for a photo. Decided by code from prompt v4 on.
-
-    Never in an emergency: the owner should be on the way to a vet, not taking photos.
-    """
-    category = load_complaints()[complaint_code].category
-    return category in PHOTO_CATEGORIES and urgency_tier != "EMERGENCY"
-
-
 QUESTIONS_FIELD = Field(
     description="2 or 3 short, kind, plain-English questions for the owner.",
     min_length=1,
@@ -135,6 +102,40 @@ class ScopedFollowUpQuestions(BaseModel):
     clarifying_questions: list[str] = QUESTIONS_FIELD
 
 
+def reply_species(reply: BaseModel) -> str:
+    """The species a reply gives, or "not stated" for a schema without the scope check."""
+    return getattr(reply, "species", "not stated")
+
+
+def out_of_scope_reason(reply: BaseModel) -> str | None:
+    """A short, owner-facing reason not to triage, or None if the reply is in scope.
+
+    Replies from schemas without the scope check are always in scope.
+    """
+    if reply_species(reply) not in SUPPORTED_SPECIES:
+        return NOT_A_CAT_OR_DOG
+    if not getattr(reply, "is_health_concern", True):
+        return "This doesn't sound like a health problem we can assess."
+    return None
+
+
+def most_urgent(*tiers: str) -> str:
+    return max(tiers, key=URGENCY_RANK.__getitem__)
+
+
+# Complaint categories a vet can judge from a photo: problems on the outside of the body.
+PHOTO_CATEGORIES = {"Skin", "Trauma", "Eye"}
+
+
+def photo_would_help(complaint_code: str, urgency_tier: str) -> bool:
+    """Whether to ask the owner for a photo. Decided by code from prompt v4 on.
+
+    Never in an emergency: the owner should be on the way to a vet, not taking photos.
+    """
+    category = load_complaints()[complaint_code].category
+    return category in PHOTO_CATEGORIES and urgency_tier != "EMERGENCY"
+
+
 class RedFlagCheck(BaseModel):
     """The model's reading of one red flag that the keyword check found."""
 
@@ -142,7 +143,8 @@ class RedFlagCheck(BaseModel):
     evidence_quote: str = Field(
         description="The owner's exact words that show whether this sign is happening."
     )
-    status: FlagStatus = Field(
+    # Doubt is treated as present (see safety_floor.py).
+    status: Literal["present", "absent", "unclear"] = Field(
         description="present = happening now or recently; absent = the owner clearly says it "
         "is not happening; unclear = cannot tell."
     )
@@ -161,47 +163,37 @@ def build_assessment_schema(
         detected_flag_ids: the red flags the keyword check found. Limiting
             `flag_id` to these stops the model answering about flags nobody asked about.
             None allows every flag.
-        reply_format: which optional fields to include. Older prompt versions
-            run with the fields they were written for (see `ReplyFormat`).
+        reply_format: which optional fields to include, so older prompt
+            versions run with the fields they were written for.
 
     Returns:
         A Pydantic model class to pass to `with_structured_output`.
     """
-    allowed_codes = tuple(load_complaints())
-    allowed_flag_ids = tuple(detected_flag_ids or load_red_flags())
-
     check_schema = create_model(
         "RedFlagCheckForThisMessage",
         __base__=RedFlagCheck,
-        flag_id=(Literal[allowed_flag_ids], Field(description="The id of the red flag.")),
-    )
-
-    scope_fields = (
-        {"species": (Species, SPECIES_FIELD), "is_health_concern": (bool, HEALTH_CONCERN_FIELD)}
-        if reply_format.scope_check == "model"
-        else {}
+        flag_id=(
+            Literal[tuple(detected_flag_ids or load_red_flags())],
+            Field(description="The id of the red flag."),
+        ),
     )
     code_description = "The single closest presenting complaint code from the list" + (
         ", or DEMO-000 if none of them fits." if reply_format.other_code_hint else "."
     )
-    photo_fields = (
-        {
-            "requires_photo_upload": (
-                bool,
-                Field(
-                    description="True only if the problem is visible on the outside of the body."
-                ),
-            )
-        }
-        if reply_format.model_sets_photo_flag
-        else {}
+    scope_fields = {
+        "species": (Species, SPECIES_FIELD),
+        "is_health_concern": (bool, HEALTH_CONCERN_FIELD),
+    }
+    photo_field = (
+        bool,
+        Field(description="True only if the problem is visible on the outside of the body."),
     )
 
     # Field order matters: the model writes fields in this order, so the
     # evidence and summary come before the decisions that should rest on them.
     return create_model(
         "TriageAssessment",
-        **scope_fields,
+        **(scope_fields if reply_format.scope_check == "model" else {}),
         red_flag_checks=(
             list[check_schema],
             Field(
@@ -216,11 +208,8 @@ def build_assessment_schema(
                 description="2-4 plain sentences summarising what the owner reported, for the vet."
             ),
         ),
-        complaint_code=(
-            Literal[allowed_codes],
-            Field(description=code_description),
-        ),
-        **photo_fields,
+        complaint_code=(Literal[tuple(load_complaints())], Field(description=code_description)),
+        **({"requires_photo_upload": photo_field} if reply_format.model_sets_photo_flag else {}),
         urgency_reason=(str, Field(description="One sentence explaining the urgency choice.")),
         urgency_tier=(UrgencyTier, Field(description="EMERGENCY, URGENT_24H or ROUTINE.")),
     )

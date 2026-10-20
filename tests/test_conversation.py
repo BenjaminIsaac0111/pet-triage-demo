@@ -4,12 +4,14 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from triage import conversation
-from triage.chains import reply_format
 from triage.schemas import (
     NOT_A_CAT_OR_DOG,
     FollowUpQuestions,
     ScopedFollowUpQuestions,
     build_assessment_schema,
+    out_of_scope_reason,
+    reply_format_for,
+    reply_species,
 )
 from triage.settings import TriageSettings
 
@@ -40,7 +42,7 @@ class StandInChains:
 
         def ask(_inputs):
             self.calls.append("questions")
-            if reply_format(prompt_version).scope_check == "model":
+            if reply_format_for(prompt_version).scope_check == "model":
                 return ScopedFollowUpQuestions(
                     **self.question_scope, clarifying_questions=questions
                 )
@@ -53,7 +55,9 @@ class StandInChains:
     ):
         self.species_seen.append(species)
         # Fields a version doesn't use (e.g. species from v4) are ignored by the schema.
-        schema = build_assessment_schema(detected_flag_ids or None, reply_format(prompt_version))
+        schema = build_assessment_schema(
+            detected_flag_ids or None, reply_format_for(prompt_version)
+        )
 
         def assess(_inputs):
             index = min(self.calls.count("assessment"), len(self.assessments) - 1)
@@ -78,6 +82,9 @@ def assessment(
     }
 
 
+STAND_IN_MODEL = object()  # never called: the stand-in chains ignore it
+
+
 @pytest.fixture
 def make_conversation(monkeypatch):
     def _make(
@@ -95,7 +102,7 @@ def make_conversation(monkeypatch):
             prompt_version=prompt_version,
             lift_check_samples=lift_check_samples,
         )
-        return conversation.TriageConversation(settings, chat_model=object()), chains
+        return conversation.TriageConversation(settings, chat_model=STAND_IN_MODEL), chains
 
     return _make
 
@@ -128,6 +135,16 @@ def test_confirmed_emergency_skips_questions(make_conversation):
     assert result.record.urgency_tier == "EMERGENCY"
     assert result.record.skipped_questions_for_emergency
     assert chains.calls == ["assessment"]
+
+
+def test_emergency_in_the_answers_does_not_claim_questions_were_skipped(make_conversation):
+    checks = [{"flag_id": "collapse", "status": "present", "evidence_quote": "he collapsed"}]
+    chat, chains = make_conversation(assessment(urgency="EMERGENCY", checks=checks))
+    assert chat.start("He's been off his food", species="dog").questions
+    turn = chat.answer("This morning he collapsed")
+    assert turn.record.urgency_tier == "EMERGENCY"
+    assert not turn.record.skipped_questions_for_emergency
+    assert chains.calls == ["questions", "assessment"]
 
 
 def test_floor_overrides_a_model_that_misses_the_emergency(make_conversation):
@@ -173,6 +190,21 @@ def test_flag_kept_when_one_recheck_sample_disagrees(make_conversation):
     assert result.record.red_flag_checks[0].status == "unclear"
 
 
+def test_a_single_recheck_sample_still_runs(make_conversation):
+    later = [assessment(checks=BREATHING_UNCLEAR, code="DEMO-012")]
+    chat, chains = make_conversation(
+        assessment(checks=BREATHING_DENIED, code="DEMO-012"), later, lift_check_samples=1
+    )
+    result = chat.start("He's not struggling to breathe, just sneezing")
+    assert chains.calls == ["assessment"] * 2
+    assert result.record.urgency_tier == "EMERGENCY"
+
+
+def test_the_given_chat_model_is_used_for_both_calls_and_the_recheck(make_conversation):
+    chat, _ = make_conversation(assessment())
+    assert chat.chat_model is chat.recheck_chat_model is STAND_IN_MODEL
+
+
 def test_no_recheck_when_no_flag_is_being_lifted(make_conversation):
     chat, chains = make_conversation(
         assessment(urgency="EMERGENCY", checks=BLOAT_PRESENT, code="DEMO-002"),
@@ -192,7 +224,7 @@ def test_other_animal_is_declined_without_calling_the_model(make_conversation):
     assert not turn.emergency_referral
     assert turn.questions is None and turn.record is None
     assert chains.calls == []
-    assert turn.metrics["out_of_scope"] == 1
+    assert turn.metrics["out_of_scope"] == 1 and turn.metrics["species_supported"] == 0
 
 
 def test_other_animal_with_emergency_phrase_is_told_to_contact_a_vet(make_conversation):
@@ -281,7 +313,8 @@ def test_v3_other_species_ends_before_questions(make_conversation):
     assert turn.out_of_scope_reason and "cats and dogs" in turn.out_of_scope_reason
     assert turn.questions is None and turn.record is None
     assert chains.calls == ["questions"]  # no assessment, no questions shown
-    assert turn.metrics["out_of_scope"] == 1
+    assert turn.metrics["out_of_scope"] == 1 and turn.metrics["species_supported"] == 0
+    assert not turn.emergency_referral
 
 
 def test_v3_not_a_health_problem_ends_before_questions(make_conversation):
@@ -292,6 +325,7 @@ def test_v3_not_a_health_problem_ends_before_questions(make_conversation):
     )
     turn = conv.start("How do I stop my puppy pulling on the lead?")
     assert "health problem" in turn.out_of_scope_reason
+    assert turn.metrics["species_supported"] == 1
 
 
 def test_v3_ignores_the_owners_pick_for_scope(make_conversation):
@@ -340,9 +374,9 @@ def test_v3_floor_emergency_beats_scope_even_if_model_says_routine(make_conversa
 
 def test_older_prompt_replies_are_always_in_scope():
     # A v1/v2 reply has no scope fields, so it can never be declined.
-    no_scope = build_assessment_schema(None, reply_format("v1"))
+    no_scope = build_assessment_schema(None, reply_format_for("v1"))
     reply = no_scope(
         **{k: v for k, v in assessment().items() if k not in {"species", "is_health_concern"}}
     )
-    assert conversation.is_in_scope(reply)
-    assert conversation.reply_species(reply) == "not stated"
+    assert out_of_scope_reason(reply) is None
+    assert reply_species(reply) == "not stated"

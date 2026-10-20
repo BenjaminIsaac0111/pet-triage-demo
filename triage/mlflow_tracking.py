@@ -24,8 +24,6 @@ import mlflow
 from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import BaseMessage
 
-from triage.outcome_matrix import OutcomeMatrix
-from triage.schemas import TriageRecord
 from triage.settings import TriageSettings
 
 DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"  # MLflow's file store is in maintenance mode
@@ -61,26 +59,33 @@ def start_tracking(experiment_name: str) -> None:
     mlflow.langchain.autolog()
 
 
-@lru_cache
-def ollama_model_details(model_name: str, ollama_base_url: str | None = None) -> dict[str, str]:
-    """Family, parameter count and quantisation of an Ollama model, for run tags.
+OLLAMA_INFO_NAMES = ("model_digest", "model_family", "model_parameter_size", "model_quantization")
 
-    These make runs filterable by model size in the MLflow UI. Values are
-    "unknown" if Ollama can't be reached.
+
+@lru_cache
+def ollama_model_info(model_name: str, ollama_base_url: str | None = None) -> dict[str, str]:
+    """Digest, family, size and quantisation of an installed Ollama model, for run params and tags.
+
+    The same name can point to different weights after a re-pull, so the digest
+    is what makes a run reproducible. The rest make runs filterable by model
+    size in the MLflow UI. Values are "unknown" if Ollama can't be reached or
+    the model isn't installed.
     """
     import ollama
 
-    unknown = {"model_family": "unknown", "model_parameter_size": "unknown"}
-    unknown["model_quantization"] = "unknown"
+    full_name = model_name if ":" in model_name else f"{model_name}:latest"
     try:
-        details = ollama.Client(host=ollama_base_url, timeout=5).show(model_name).details
-    except Exception:
-        return unknown
-    return {
-        "model_family": details.family or "unknown",
-        "model_parameter_size": details.parameter_size or "unknown",  # e.g. "8.2B"
-        "model_quantization": details.quantization_level or "unknown",  # e.g. "Q4_K_M"
-    }
+        installed = ollama.Client(host=ollama_base_url, timeout=5).list().models
+        model = next(m for m in installed if m.model == full_name)
+        info = {
+            "model_digest": model.digest[:12],
+            "model_family": model.details.family,
+            "model_parameter_size": model.details.parameter_size,  # e.g. "8.2B"
+            "model_quantization": model.details.quantization_level,  # e.g. "Q4_K_M"
+        }
+    except Exception:  # Ollama isn't running, or the model isn't installed
+        info = {}
+    return {name: info.get(name) or "unknown" for name in OLLAMA_INFO_NAMES}
 
 
 @lru_cache
@@ -96,11 +101,6 @@ def hardware_label() -> str:
         return result.stdout.strip().splitlines()[0] or "unknown"
     except Exception:
         return "no NVIDIA GPU found"
-
-
-def describe_run(description: str, tags: dict[str, str]) -> None:
-    """Give the active run a description (shown in the MLflow UI) and filterable tags."""
-    mlflow.set_tags({"mlflow.note.content": description, **tags})
 
 
 @contextmanager
@@ -119,33 +119,6 @@ def count_tokens():
         totals["output_tokens"] += per_model.get("output_tokens", 0)
 
 
-def log_outcome_matrix(matrix: OutcomeMatrix, title: str) -> None:
-    """Log the outcome matrix to the active run as a table and a colour-coded image."""
-    import matplotlib.pyplot as plt
-
-    mlflow.log_table(matrix.as_table(), "outcome_matrix.json")
-    figure = matrix.figure(title)
-    mlflow.log_figure(figure, "outcome_matrix.png")
-    plt.close(figure)
-
-
-@lru_cache
-def ollama_model_digest(model_name: str, ollama_base_url: str | None = None) -> str:
-    """Ollama's id for the exact weights behind a name like "qwen2.5:7b".
-
-    The same name can point to different weights after a re-pull, so the digest
-    is what makes a run reproducible. Returns "unknown" if Ollama can't be reached.
-    """
-    import ollama
-
-    full_name = model_name if ":" in model_name else f"{model_name}:latest"
-    try:
-        installed = ollama.Client(host=ollama_base_url, timeout=5).list().models
-    except Exception:
-        return "unknown"
-    return next((m.digest[:12] for m in installed if m.model == full_name and m.digest), "unknown")
-
-
 def run_params(settings: TriageSettings) -> dict[str, str | float]:
     """The settings to log as MLflow parameters: enough to say exactly what ran."""
     return {
@@ -153,7 +126,7 @@ def run_params(settings: TriageSettings) -> dict[str, str | float]:
         "model_name": settings.model_name,
         # Hosted providers don't expose weights ids; their model names are versioned instead.
         "model_digest": (
-            ollama_model_digest(settings.model_name, settings.ollama_base_url)
+            ollama_model_info(settings.model_name, settings.ollama_base_url)["model_digest"]
             if settings.provider == "ollama"
             else "n/a"
         ),
@@ -179,53 +152,27 @@ def tracked_run(settings: TriageSettings, run_name: str | None = None, nested: b
         yield run
 
 
-def log_turn_metrics(metrics: dict[str, float]) -> None:
-    """Log one turn's timings and checks to the active run."""
-    mlflow.log_metrics({name: float(value) for name, value in metrics.items()})
+def log_conversation(history: list[BaseMessage], turn, extra: dict | None = None) -> None:
+    """Save the transcript and how the conversation ended as triage_record.json in the active run.
 
-
-def log_conversation_record(
-    history: list[BaseMessage], record: TriageRecord, extra: dict | None = None
-) -> None:
-    """Save the transcript and the final record as triage_record.json in the active run.
+    A conversation that was not triaged keeps its reason instead of a record,
+    so every run has one file to read. Reviewing these is how a too-strict
+    scope rule is caught.
 
     Args:
         history: the conversation's messages.
-        record: the final record for the vet.
+        turn: the last TurnResult: a record, or a reason it was not triaged.
         extra: anything else to include, e.g. whether a photo was attached.
     """
     # TODO: For production monitoring, also log the owner's language and the
     # species, and any vet correction to the code or urgency, so results can
     # be checked per group and drift can be spotted over time.
-    mlflow.log_dict(
-        {
-            "transcript": [message.model_dump() for message in history],
-            **(extra or {}),
-            **record.model_dump(),
-        },
-        "triage_record.json",
-    )
-
-
-def log_out_of_scope(
-    history: list[BaseMessage], reason: str, emergency_referral: bool = False
-) -> None:
-    """Save the transcript of a conversation that was not triaged, and why.
-
-    Kept as triage_record.json, like a triaged conversation, so every run has
-    one file to read. Reviewing these is how a too-strict scope rule is caught.
-
-    Args:
-        history: the conversation's messages.
-        reason: the owner-facing reason it wasn't triaged.
-        emergency_referral: True if an emergency phrase meant the owner was
-            told to contact a vet now.
-    """
-    mlflow.log_dict(
-        {
-            "transcript": [message.model_dump() for message in history],
-            "out_of_scope_reason": reason,
-            "emergency_referral": emergency_referral,
-        },
-        "triage_record.json",
-    )
+    if turn.record:
+        outcome = turn.record.model_dump()
+    else:
+        outcome = {
+            "out_of_scope_reason": turn.out_of_scope_reason,
+            "emergency_referral": turn.emergency_referral,
+        }
+    transcript = [message.model_dump() for message in history]
+    mlflow.log_dict({"transcript": transcript, **(extra or {}), **outcome}, "triage_record.json")

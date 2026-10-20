@@ -44,6 +44,27 @@ def test_web_demo_other_animal_needs_no_model(monkeypatch, tmp_path, message, sh
     assert any("EMERGENCY" in box.value for box in app.error) is shows_emergency
 
 
+def test_rules_only_evaluation_runs_end_to_end(monkeypatch, tmp_path, capsys):
+    # The baseline needs no model and is deterministic, so its totals are fixed
+    # (they're the "Rules only" column in the README).
+    import mlflow
+
+    import evaluate
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    for extra in ([], ["--edge-cases"]):
+        monkeypatch.setattr("sys.argv", ["evaluate.py", "--baseline", "lexical", *extra])
+        evaluate.main()
+    runs = mlflow.search_runs(search_all_experiments=True, filter_string="tags.case_set != ''")
+    totals = {row["tags.case_set"]: row for _, row in runs.iterrows()}
+    main, edge = totals["main"], totals["edge"]
+    assert main["metrics.runs"] == 14 and main["metrics.emergencies_caught"] == 3
+    assert main["metrics.under_triaged"] == 7 and main["metrics.over_triaged"] == 1
+    assert main["metrics.code_match"] == 9 and main["metrics.photo_match"] == 13
+    assert edge["metrics.runs"] == 8 and edge["metrics.outcome_match"] == 5
+    assert "emergencies caught:      3/4" in capsys.readouterr().out
+
+
 def ollama_running() -> bool:
     try:
         urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)

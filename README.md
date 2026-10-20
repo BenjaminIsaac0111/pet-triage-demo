@@ -4,6 +4,16 @@ A pet owner says what's wrong with their cat or dog. The app asks a few follow-u
 
 A small demo of **LangChain**, **MLflow** and a local model run with **Ollama**. **Prototype only:** the test cases are mostly made up and labelled by a non-vet.
 
+## Changelog
+
+**20 October 2026, after the interview.** A tidy-up, with no change in what the app does.
+
+- **Less code to read.** 335 fewer lines of app code (2,620 → 2,285). Three small modules were folded into the ones that use them, and `evaluate.py` runs the main and edge cases with one loop instead of two near-copies.
+- **Checked that nothing changed.** I ran prompts v1, v3 and v4 and the rules-only baseline on the old and new code. The scores, and every prompt sent to the model, were identical.
+- **Stronger tests.** I mutation-tested the unit tests: made small deliberate bugs in the code and checked the tests caught them. They caught 74% before and at least 81% now. The new tests cover gaps such as a partly made-up quote passing as the owner's words, and one emergency sign's answer counting for another.
+- **Faster safety re-check.** Before dismissing an emergency sign, the app asks the model again 4 times; these now run at the same time instead of one after another.
+- **Results re-run.** The [results table](#results) is from a fresh run (`readme-results-2026-10-20`). Most numbers are unchanged; v4 moved by one in two rows (and by 2 input tokens), which is within the noise of a local model.
+
 ## What it shows
 
 - **A LangChain chain that asks questions.** Two main model calls: one asks the follow-up questions, one writes the vet's note. Each reply has to fill in a fixed form defined in Pydantic (`triage/schemas.py`), so the model can only pick complaint codes from our list.
@@ -69,18 +79,18 @@ Other modules are listed in `triage/__init__.py`.
 
 ## Results
 
-Run locally on `qwen2.5:7b` at temperature 0, with a median of about 1.5 s per conversation. 7 test cases (6 made up, 1 real), each worded two ways: 14 conversations, plus 8 edge cases (such as other animals, non-health questions and problems with no matching code). These are small numbers, so a difference of one or two is noise. In MLflow, filter by `tags.study = "readme-results"`.
+Run locally on `qwen2.5:7b` at temperature 0, with a median of about 1.8 s per conversation. 7 test cases (6 made up, 1 real), each worded two ways: 14 conversations, plus 8 edge cases (such as other animals, non-health questions and problems with no matching code). These are small numbers, so a difference of one or two is noise. In MLflow, filter by `tags.study = "readme-results-2026-10-20"`.
 
 | | Rules only | v1 | v2 | v3 | v4 (default) |
 |---|---|---|---|---|---|
 | Emergencies caught (of 4) | 3 | 3 | 3 | 3 | 3 |
-| … by the model alone, before the safety rule | – | 1 | 2 | 3 | 2 |
+| … by the model alone, before the safety rule | – | 1 | 2 | 3 | 3 |
 | Rated less urgent than expected (of 14) | **7** | 1 | 1 | 1 | 1 |
-| Rated more urgent than expected (of 14) | 1 | 1 | 1 | 2 | 1 |
+| Rated more urgent than expected (of 14) | 1 | 1 | 1 | 2 | 2 |
 | Right complaint code (of 14) | 9 | 12 | 12 | 13 | 12 |
 | Right photo request (of 14) | 13 | 12 | 12 | 12 | 13 |
 | Edge cases handled as expected (of 8) | 5 | 5 | 5 | 7 | 7 |
-| Input tokens per conversation | – | 798 | 929 | 1,131 | 904 |
+| Input tokens per conversation | – | 798 | 929 | 1,131 | 906 |
 
 **What each version changed, and why:**
 - **v2** added plain definitions of each urgency level, after v1 rated a spreading skin sore as routine on a larger model. It was written after seeing that failure, so its score is partly fitted to the test.
@@ -91,7 +101,7 @@ Run locally on `qwen2.5:7b` at temperature 0, with a median of about 1.5 s per c
 - **Rules and the model need each other.** Rules alone rated half the conversations less urgent than expected. The model alone missed emergencies that the word list caught (v1 caught just 1 of 4 by itself).
 - **One emergency is missed by every version:** a blocked cat described as "only a few drops of wee come out". No emergency phrase matches it, and the model rates it "within 24 hours", even when its own reasoning calls it possibly life-threatening (v1).
 - **v4 trades a little for safety.** No cat or dog is ever turned away, it no longer asks for photos during emergencies, and it uses about 20% fewer tokens. The cost: a dog-training question now reaches the vet instead of being declined.
-- **The small model is unreliable at checking emergency signs.** It skipped the check in 12 of 19 cases, and when it did answer, 4 of 7 times it quoted our instructions instead of the owner. The safety rule treats both as "still an emergency", which is why "*not* struggling to breathe" is rated an emergency by every version.
+- **The small model is unreliable at checking emergency signs.** It skipped the check in 11 of 19 cases, and when it did answer, 3 of 8 times it quoted our instructions instead of the owner. The safety rule treats both as "still an emergency", which is why "*not* struggling to breathe" is rated an emergency by every version.
 - **Found in my own testing:** a cat called Lily was flagged as possible poisoning, because "lily" was on the emergency word list. It now needs context ("a lily", "lily pollen"), and a test checks it.
 - **Still to watch:** about half the notes for the vet name a possible condition (by a keyword search), though none of the questions owners saw offered a diagnosis. And v4 asks fewer questions than v3, often just one.
 - **One real case:** my cat had a painful lump after being neutered. I wrote the message down before running anything, and labelled it with what the vet nurse decided at the time (an appointment the next day). Every prompt version matched it.

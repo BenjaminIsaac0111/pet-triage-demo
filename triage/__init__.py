@@ -10,12 +10,9 @@ Where to start reading:
 Supporting modules:
 
     chains.py            LangChain prompts and chains, with one retry on bad output
-    chat_models.py       picks the model provider (Ollama, OpenAI or Anthropic)
-    settings.py          every setting, read from environment variables
+    settings.py          every setting, read from environment variables, and the chat model
     reference_data.py    loads the JSON files in data/
-    text_matching.py     shared text clean-up for phrase matching
     mlflow_tracking.py   what gets logged to MLflow
-    scoring.py           scores a record against a test case
-    outcome_matrix.py    expected against actual outcome, logged by the evaluation
+    scoring.py           scores and totals evaluation runs, and the outcome matrix
     lexical_baseline.py  rules-only baseline, to show what the model adds
 """

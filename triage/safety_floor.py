@@ -18,12 +18,12 @@ Raising urgency needs no evidence; lowering it does. This deliberately accepts
 some over-escalation in return for missing fewer real emergencies.
 """
 
+import re
 from dataclasses import dataclass
 from itertools import pairwise
 
 from triage.reference_data import load_red_flags
 from triage.schemas import URGENCY_RANK, RedFlagCheck, most_urgent
-from triage.text_matching import contains_phrase, normalise_text
 
 # Share of the quote's words that must appear in the owner's text. Not 100%,
 # because models paraphrase slightly even when asked to quote.
@@ -40,6 +40,20 @@ class SafetyFloorResult:
     floor_raised_urgency: bool  # True if the floor overrode a lower model urgency
     flags_kept: list[str]  # red flags still in force
     flags_lifted: list[str]  # red flags dismissed with evidence
+
+
+def normalise_text(text: str) -> str:
+    """Lower-case the text and reduce it to plain words separated by single spaces."""
+    text = re.sub(r"[^a-z0-9' ]+", " ", text.lower().replace("’", "'"))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def contains_phrase(text: str, phrase: str) -> bool:
+    """True if `phrase` appears in `text` as whole words.
+
+    Padding with spaces makes "fit" match "having a fit" but not "outfitting".
+    """
+    return f" {normalise_text(phrase)} " in f" {normalise_text(text)} "
 
 
 def find_red_flags(owner_text: str) -> list[str]:
@@ -65,8 +79,7 @@ def quote_appears_in(quote: str, owner_text: str) -> bool:
     if len(quote_words) < 2:
         return False
     owner_words = normalise_text(owner_text).split()
-    owner_word_set = set(owner_words)
-    share_found = sum(word in owner_word_set for word in quote_words) / len(quote_words)
+    share_found = sum(word in owner_words for word in quote_words) / len(quote_words)
     return share_found >= QUOTE_MATCH_THRESHOLD and _negations_match(quote_words, owner_words)
 
 
@@ -86,18 +99,15 @@ def _negations_match(quote_words: list[str], owner_words: list[str]) -> bool:
     """
 
     def pairs(words: list[str]) -> list[tuple[str, str]]:
-        marked = ["<not>" if _is_negation(word) else word for word in words]
-        return list(pairwise(marked))
+        return list(pairwise("<not>" if _is_negation(word) else word for word in words))
 
     owner_pairs = set(pairs(owner_words))
     quote_pairs = pairs(quote_words)
     for position, word in enumerate(quote_words):
-        if not _is_negation(word):
-            continue
-        is_last_word = position == len(quote_words) - 1
-        pair = quote_pairs[position - 1] if is_last_word else quote_pairs[position]
-        if pair not in owner_pairs:
-            return False
+        if _is_negation(word):
+            is_last_word = position == len(quote_words) - 1
+            if quote_pairs[position - 1 if is_last_word else position] not in owner_pairs:
+                return False
     return True
 
 
@@ -132,9 +142,7 @@ def apply_safety_floor(
         if _flag_is_credibly_absent(checks_by_flag.get(flag_id), owner_text)
     ]
     kept = [flag_id for flag_id in detected_flag_ids if flag_id not in lifted]
-
-    floor = "EMERGENCY" if kept else "ROUTINE"
-    final_urgency = most_urgent(model_urgency, floor)
+    final_urgency = most_urgent(model_urgency, "EMERGENCY" if kept else "ROUTINE")
     return SafetyFloorResult(
         urgency_tier=final_urgency,
         floor_raised_urgency=URGENCY_RANK[final_urgency] > URGENCY_RANK[model_urgency],

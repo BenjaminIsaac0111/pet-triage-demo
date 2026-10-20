@@ -48,8 +48,19 @@ class TestQuoteAppearsIn:
     def test_invented_quote_rejected(self):
         assert not quote_appears_in("breathing is completely normal", "He's sneezing a lot")
 
+    def test_partly_invented_quote_rejected(self):
+        # 3 of the 5 words are the owner's: below the 80% needed.
+        assert not quote_appears_in("he is breathing totally normally", "He is breathing fast")
+
+    def test_quote_exactly_at_the_threshold_accepted(self):
+        # 4 of the 5 words are the owner's: exactly 80%.
+        assert quote_appears_in("he keeps sneezing every morning", "He keeps sneezing every day")
+
     def test_single_word_rejected(self):
         assert not quote_appears_in("no", "no breathing problems")
+
+    def test_two_word_quote_accepted(self):
+        assert quote_appears_in("not coughing", "He's not coughing")
 
     def test_negation_moved_onto_the_sign_rejected(self):
         # Every word is in the owner's text, but the owner said the opposite.
@@ -63,6 +74,8 @@ class TestQuoteAppearsIn:
     def test_negation_at_end_of_quote_checked_against_word_before(self):
         assert quote_appears_in("breathing problems none", "breathing problems none at all")
         assert not quote_appears_in("breathing problems none", "none, breathing problems")
+        owner = "None of that, the dog has breathing problems"
+        assert not quote_appears_in("the dog has breathing problems none", owner)
 
 
 class TestApplySafetyFloor:

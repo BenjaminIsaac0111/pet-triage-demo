@@ -5,7 +5,6 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from triage.chains import reply_format
 from triage.reference_data import (
     DATA_DIR,
     load_complaints,
@@ -13,7 +12,14 @@ from triage.reference_data import (
     load_evaluation_cases,
     load_red_flags,
 )
-from triage.schemas import TriageRecord, build_assessment_schema, most_urgent, photo_would_help
+from triage.schemas import (
+    FollowUpQuestions,
+    TriageRecord,
+    build_assessment_schema,
+    most_urgent,
+    photo_would_help,
+    reply_format_for,
+)
 
 
 def valid_assessment(**overrides):
@@ -67,13 +73,28 @@ def test_evidence_fields_come_before_decision_fields():
 
 
 def test_v3_scope_is_decided_before_anything_else():
-    field_order = list(build_assessment_schema(None, reply_format("v3")).model_fields)
+    field_order = list(build_assessment_schema(None, reply_format_for("v3")).model_fields)
     assert field_order[:2] == ["species", "is_health_concern"]
+
+
+def test_other_code_hint_only_from_v3():
+    def code_description(version):
+        schema = build_assessment_schema(None, reply_format_for(version)).model_json_schema()
+        return schema["properties"]["complaint_code"]["description"]
+
+    assert "DEMO-000" not in code_description("v1") and "DEMO-000" not in code_description("v2")
+    assert "DEMO-000" in code_description("v3") and "DEMO-000" in code_description("v4")
+
+
+def test_at_most_three_questions():
+    FollowUpQuestions(clarifying_questions=["a", "b", "c"])
+    with pytest.raises(ValidationError):
+        FollowUpQuestions(clarifying_questions=["a", "b", "c", "d"])
 
 
 def test_v3_unknown_species_is_rejected():
     with pytest.raises(ValidationError):
-        build_assessment_schema(None, reply_format("v3"))(**valid_assessment(species="raccoon"))
+        build_assessment_schema(None, reply_format_for("v3"))(**valid_assessment(species="raccoon"))
 
 
 @pytest.mark.parametrize(

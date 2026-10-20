@@ -11,7 +11,6 @@ survive between clicks is kept in `st.session_state` (see `reset_state`).
 """
 
 import io
-from pathlib import Path
 
 import mlflow
 import streamlit as st
@@ -54,12 +53,10 @@ def reset_state() -> None:
     # or straight to out_of_scope from either of the first two.
     state.stage = "describe"
     state.species = None  # "cat", "dog" or "other", as the owner picked
-    state.out_of_scope_reason = None  # set if the conversation ends without triage
-    state.emergency_referral = False  # not triaged, but told to contact a vet now
     state.messages = []  # (role, text) pairs shown in the chat
     state.conversation = None  # the TriageConversation in progress
     state.run_id = None  # the MLflow run this conversation logs to
-    state.record = None  # the final TriageRecord, once there is one
+    state.turn = None  # the latest TurnResult: questions, a record, or out of scope
     state.photo = None  # (file name, image bytes), if the owner added one
     state.error = None  # a message to show if the model call failed
 
@@ -78,7 +75,7 @@ def run_tracked_turn(take_turn, *turn_args) -> TurnResult | None:
             state.run_id = run.info.run_id
             with st.spinner("Thinking... a local model can take 10-30 seconds."):
                 turn = take_turn(*turn_args)
-            mlflow_tracking.log_turn_metrics(turn.metrics)
+            mlflow.log_metrics(turn.metrics)
         return turn
     except Exception as error:  # show the problem rather than a stack trace
         with mlflow.start_run(run_id=state.run_id):
@@ -102,48 +99,29 @@ def send_answers(owner_answers: str) -> None:
 
 
 def show_turn(turn: TurnResult | None) -> None:
-    """Move the conversation on: show the questions, ask for a photo, or finish."""
+    """Move the conversation on: show the questions, end it, or ask for a photo."""
     state = st.session_state
     if turn is None:
         return
+    state.turn = turn
     if turn.questions:
         questions = "\n".join(f"- {question}" for question in turn.questions)
-        state.messages.append(
-            (
-                "assistant",
-                f"Thanks. A few quick questions so the vet has the full picture:\n\n{questions}",
-            )
-        )
+        say(f"Thanks. A few quick questions so the vet has the full picture:\n\n{questions}")
         state.stage = "questions"
-        return
-    if turn.out_of_scope_reason:
-        end_out_of_scope(turn.out_of_scope_reason, turn.emergency_referral)
-        return
-
-    state.record = turn.record
-    if state.record.urgency_tier != "EMERGENCY" and state.record.requires_photo_upload:
-        state.messages.append(
-            (
-                "assistant",
-                "Thank you. A photo would help the vet see this. Could you add one below?",
-            )
-        )
+    elif turn.out_of_scope_reason:
+        advice = EMERGENCY_MESSAGE if turn.emergency_referral else OUT_OF_SCOPE_MESSAGE
+        say(f"{turn.out_of_scope_reason} {advice}")
+        log_outcome()
+        state.stage = "out_of_scope"
+    elif turn.record.urgency_tier != "EMERGENCY" and turn.record.requires_photo_upload:
+        say("Thank you. A photo would help the vet see this. Could you add one below?")
         state.stage = "photo"
     else:
         finish_conversation()
 
 
-def end_out_of_scope(reason: str, emergency_referral: bool) -> None:
-    """Tell the owner this can't be triaged (or to contact a vet now), and log the conversation."""
-    state = st.session_state
-    state.out_of_scope_reason = reason
-    state.emergency_referral = emergency_referral
-    advice = EMERGENCY_MESSAGE if emergency_referral else OUT_OF_SCOPE_MESSAGE
-    state.messages.append(("assistant", f"{reason} {advice}"))
-    with mlflow.start_run(run_id=state.run_id):
-        mlflow.log_metric("schema_valid", 1)
-        mlflow_tracking.log_out_of_scope(state.conversation.history, reason, emergency_referral)
-    state.stage = "out_of_scope"
+def say(text: str) -> None:
+    st.session_state.messages.append(("assistant", text))
 
 
 def finish_conversation(photo: tuple[str, bytes] | None = None) -> None:
@@ -157,18 +135,21 @@ def finish_conversation(photo: tuple[str, bytes] | None = None) -> None:
     state.photo = photo
     if photo:
         state.messages.append(("user", f"📷 Photo attached: {photo[0]}"))
-    if state.record.skipped_questions_for_emergency:
-        state.messages.append(
-            ("assistant", "I've skipped my questions because what you describe could be urgent.")
-        )
-    with mlflow.start_run(run_id=state.run_id):
-        mlflow.log_metrics({"schema_valid": 1, "photo_attached": int(photo is not None)})
-        mlflow_tracking.log_conversation_record(
-            state.conversation.history,
-            state.record,
-            extra={"photo": {"attached": photo is not None, "name": photo[0] if photo else None}},
-        )
+    if state.turn.record.skipped_questions_for_emergency:
+        say("I've skipped my questions because what you describe could be urgent.")
+    log_outcome(
+        {"photo_attached": int(photo is not None)},
+        extra={"photo": {"attached": photo is not None, "name": photo[0] if photo else None}},
+    )
     state.stage = "done"
+
+
+def log_outcome(metrics: dict | None = None, extra: dict | None = None) -> None:
+    """Log how the conversation ended to its MLflow run."""
+    state = st.session_state
+    with mlflow.start_run(run_id=state.run_id):
+        mlflow.log_metrics({"schema_valid": 1, **(metrics or {})})
+        mlflow_tracking.log_conversation(state.conversation.history, state.turn, extra)
 
 
 def drawn_sample_photo() -> bytes:
@@ -193,7 +174,7 @@ def render_sidebar() -> TriageSettings:
         st.header("Settings")
         defaults = TriageSettings()
         model_name = st.text_input(f"Model ({defaults.provider})", defaults.model_name)
-        prompt_versions = sorted(p.name for p in Path(PROMPTS_DIR).iterdir() if p.is_dir())
+        prompt_versions = sorted(p.name for p in PROMPTS_DIR.iterdir() if p.is_dir())
         prompt_version = st.selectbox(
             "Prompt version", prompt_versions, index=prompt_versions.index(defaults.prompt_version)
         )
@@ -275,11 +256,11 @@ def render_owner_view(settings: TriageSettings) -> None:
             send_answers(owner_answers)
             st.rerun()
     elif state.stage == "done":
-        show_box, advice = URGENCY_DISPLAY[state.record.urgency_tier]
+        show_box, advice = URGENCY_DISPLAY[state.turn.record.urgency_tier]
         show_box(advice)
         st.button("Start a new conversation", on_click=reset_state)
     elif state.stage == "out_of_scope":
-        if state.emergency_referral:
+        if state.turn.emergency_referral:
             st.error("EMERGENCY: " + EMERGENCY_MESSAGE)
         else:
             st.info(f"Not triaged. {OUT_OF_SCOPE_MESSAGE}")
@@ -289,13 +270,13 @@ def render_owner_view(settings: TriageSettings) -> None:
 def render_vet_view() -> None:
     """The triage record as the vet would see it."""
     state = st.session_state
-    record = state.record
     st.subheader("Vet's view: triage record")
-    if state.out_of_scope_reason:
-        st.info(f"No record: not triaged. {state.out_of_scope_reason}")
-        if state.emergency_referral:
+    if state.stage == "out_of_scope":
+        st.info(f"No record: not triaged. {state.turn.out_of_scope_reason}")
+        if state.turn.emergency_referral:
             st.error("An emergency phrase was found, so the owner was told to contact a vet now.")
         return
+    record = state.turn.record if state.turn else None
     if record is None:
         st.caption("The record appears here once the assistant has enough information.")
         return
@@ -315,9 +296,7 @@ def render_vet_view() -> None:
         st.markdown("**Red flags found by the keyword check**")
         for check in record.red_flag_checks:
             agreement = record.flag_lift_agreement.get(check.flag_id)
-            agreement_note = (
-                f" (re-check agreement: {agreement:.0%})" if agreement is not None else ""
-            )
+            agreement_note = "" if agreement is None else f" (re-check agreement: {agreement:.0%})"
             st.markdown(
                 f"- `{check.flag_id}`: **{check.status}**{agreement_note}, "
                 f'quote: "{check.evidence_quote}"'

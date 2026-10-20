@@ -21,6 +21,13 @@ class TestAgreementPerFlag:
         samples = [[check("breathing", "absent")], [check("breathing", "present")]]
         assert agreement_per_flag(["breathing"], samples) == {"breathing": 0.5}
 
+    def test_another_flags_answer_does_not_count(self):
+        samples = [[check("breathing", "absent")], [check("collapse", "absent")]]
+        assert agreement_per_flag(["breathing", "collapse"], samples) == {
+            "breathing": 0.5,
+            "collapse": 0.5,
+        }
+
     def test_sample_that_skips_the_flag_counts_as_disagreeing(self):
         samples = [[check("breathing", "absent")], []]
         assert agreement_per_flag(["breathing"], samples) == {"breathing": 0.5}

@@ -13,23 +13,19 @@ consistently wrong.
 """
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
 
-from triage.chains import invoke_with_retry
 from triage.schemas import RedFlagCheck
 
 
 @dataclass
 class RecheckResult:
-    # Per flag, the share of samples that also said "absent" (1.0 = all agreed).
-    agreement: dict[str, float]
-    # Flags where at least one sample disagreed; these must be kept.
-    doubted_flags: set[str]
-    # Logged to MLflow. Names are kept stable so old runs stay comparable.
-    metrics: dict[str, float] = field(default_factory=dict)
+    agreement: dict[str, float]  # per flag, the share of samples that also said "absent"
+    doubted_flags: set[str]  # flags where at least one sample disagreed; these must be kept
+    metrics: dict[str, float]  # logged to MLflow; names kept stable so old runs stay comparable
 
 
 def recheck_lifted_flags(
@@ -38,7 +34,7 @@ def recheck_lifted_flags(
     lifted_flag_ids: list[str],
     sample_count: int,
 ) -> RecheckResult:
-    """Ask the assessment again `sample_count` times and measure agreement per flag.
+    """Ask the assessment again `sample_count` times, in parallel, and measure agreement per flag.
 
     Args:
         sampling_chain: the assessment chain, built with a higher-temperature model.
@@ -46,24 +42,15 @@ def recheck_lifted_flags(
         lifted_flag_ids: the flags the first assessment wanted to dismiss.
         sample_count: how many extra answers to collect.
     """
-    # TODO: Run the samples in parallel (e.g. chain.batch). They're independent,
-    # and running them one after another took a case from about 22 s to 86 s.
     # TODO: Once vets have labelled real cases, calibrate this decision with
     # conformal risk control, to set and check a limit on wrongly dismissed
     # emergencies, instead of "every sample must agree".
-    samples: list[list[RedFlagCheck]] = []
-    failures = 0
     started = time.perf_counter()
-    for _ in range(sample_count):
-        try:
-            assessment, _retries = invoke_with_retry(sampling_chain, history, max_retries=0)
-            samples.append(assessment.red_flag_checks)
-        except Exception:
-            # A broken reply or a timeout counts as disagreeing, so the flag is
-            # kept. It's counted separately so a broken model doesn't look
-            # like an unsure one.
-            samples.append([])
-            failures += 1
+    replies = sampling_chain.batch([{"history": history}] * sample_count, return_exceptions=True)
+    # A broken reply or a timeout counts as disagreeing, so the flag is kept.
+    # It's counted separately so a broken model doesn't look like an unsure one.
+    failures = sum(isinstance(reply, Exception) for reply in replies)
+    samples = [[] if isinstance(reply, Exception) else reply.red_flag_checks for reply in replies]
 
     agreement = agreement_per_flag(lifted_flag_ids, samples)
     doubted = {flag_id for flag_id, share in agreement.items() if share < 1.0}
